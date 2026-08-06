@@ -1,22 +1,18 @@
-# Node modules
-node_modules/
-**/node_modules/
-
-# Frontend build artifacts
-remitrelief-frontend/dist/
-remitrelief-frontend/.vite/
-
-# Backend build artifacts
-remitrelief-backend/node_modules/
-remitrelief-backend/src/contracts/escrow-contract/target/
-remitrelief-backend/src/contracts/escrow-contract/Cargo.lock
-
-# Environment files
+node_modules
+.vercel
 .env
-*.env
-
-# Logs and editor files
+.env.*
+!.env.example
+remitrelief-backend/data/
+remitrelief-frontend/dist
+remitrelief-backend/src/contracts/escrow-contract/target/
+remitrelief-backend/src/contracts/escrow-contract/stellar.exe
+remitrelief-backend/src/contracts/escrow-contract/stellar-cli.tar.gz
+.deploy-files.json
+.deploy-files-part*.json
+.deploy-payload.json
+.deploy-chunk-*.txt
+.mcp-deploy-args*.json
+deploy-part.json
 *.log
-*.tmp
 .DS_Store
-.vscode/

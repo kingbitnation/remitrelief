@@ -1,0 +1,46 @@
+import {
+  Horizon,
+  TransactionBuilder,
+  Networks,
+  rpc,
+} from "@stellar/stellar-sdk";
+
+const HORIZON_URL = import.meta.env.VITE_HORIZON_URL || "https://horizon-testnet.stellar.org";
+const SOROBAN_RPC_URL =
+  import.meta.env.VITE_SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
+const NETWORK_PASSPHRASE = Networks.TESTNET;
+
+export const horizon = new Horizon.Server(HORIZON_URL);
+export const sorobanServer = new rpc.Server(SOROBAN_RPC_URL, { allowHttp: false });
+
+/**
+ * Submit a wallet-signed Soroban transaction and wait for confirmation.
+ */
+export async function submitSignedSorobanTx(signedXDR) {
+  const tx = TransactionBuilder.fromXDR(signedXDR, NETWORK_PASSPHRASE);
+  const sendResult = await sorobanServer.sendTransaction(tx);
+  if (sendResult.status === "ERROR") {
+    throw new Error(`Submission failed: ${JSON.stringify(sendResult.errorResult)}`);
+  }
+  return pollTransaction(sendResult.hash);
+}
+
+async function pollTransaction(hash, { intervalMs = 1500, timeoutMs = 45000 } = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const res = await sorobanServer.getTransaction(hash);
+    if (res.status === "SUCCESS") return { hash, status: res.status };
+    if (res.status === "FAILED") {
+      throw new Error(`Transaction failed on network`);
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error(`Transaction ${hash} did not settle in time`);
+}
+
+/** Shorten a Stellar public key for display. */
+export function shortenAddress(address, chars = 4) {
+  if (!address) return "";
+  if (address.length < 12) return address;
+  return `${address.slice(0, chars + 1)}…${address.slice(-chars)}`;
+}

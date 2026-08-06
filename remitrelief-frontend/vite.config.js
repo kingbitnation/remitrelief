@@ -6,4 +6,14 @@ export default defineConfig({
     global: "globalThis",
   },
   plugins: [react()],
+  server: {
+    proxy: {
+      "/campaigns": "http://localhost:4000",
+      "/donations": "http://localhost:4000",
+      "/milestones": "http://localhost:4000",
+      "/ledger": "http://localhost:4000",
+      "/stats": "http://localhost:4000",
+      "/health": "http://localhost:4000",
+    },
+  },
 });

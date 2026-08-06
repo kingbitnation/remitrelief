@@ -1,0 +1,24 @@
+{
+  "name": "remitrelief",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev:api": "npm --prefix remitrelief-backend run dev",
+    "dev:web": "npm --prefix remitrelief-frontend run dev",
+    "build": "cd remitrelief-frontend && npm install && npm run build",
+    "start": "npm --prefix remitrelief-backend run start"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^12.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "devDependencies": {
+    "vercel": "^39.1.1"
+  }
+}
