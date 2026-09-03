@@ -12,7 +12,7 @@ stellar contract deploy \
   --source <YOUR_DEPLOYER_SECRET_KEY> \
   --network testnet
 
-# 3. Initialize the deployed instance for one campaign
+# 3. Initialize once (re-initialize is rejected by the contract)
 stellar contract invoke \
   --id <CONTRACT_ADDRESS_FROM_STEP_2> \
   --source <YOUR_DEPLOYER_SECRET_KEY> \
@@ -21,12 +21,18 @@ stellar contract invoke \
   --recipient <RECIPIENT_STELLAR_ADDRESS> \
   --usdc_token <USDC_SAC_CONTRACT_ADDRESS_ON_TESTNET> \
   --verifiers '["<NGO_VERIFIER_ADDRESS_1>"]' \
-  --milestone_amounts '[500,500,500,500]'
+  --milestone_amounts '[5000000000,5000000000,5000000000,5000000000]'
 ```
 
-Drop the resulting contract address into `campaigns.js` as `escrowAddress`, and
-into the backend `.env` as `DEMO_ESCROW_CONTRACT_ID` for local testing.
+Put the contract address in backend `.env` as `DEMO_ESCROW_CONTRACT_ID` (wired to the Oaxaca seed campaign via `store.js`).
 
-**Demo shortcut:** deploy once ahead of time, fund it via a couple of test
-donations, and have `verify_milestone` + `release` ready to invoke live during
-the pitch — this is the "look, it's really on-chain" moment.
+**Security notes**
+
+- `initialize` can only succeed once per contract instance.
+- Deposits require `amount > 0`.
+- Only allowlisted verifiers can call `verify_milestone`.
+- `release` pays only the fixed recipient and cannot double-release a milestone.
+
+```bash
+cargo test --manifest-path src/contracts/escrow-contract/Cargo.toml
+```

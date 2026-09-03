@@ -57,6 +57,7 @@ export default function DonateModal({ campaign, onClose, onSuccess }) {
         txHash,
         status: hasEscrow ? "escrowed" : "demo-escrowed",
         message,
+        demo: !hasEscrow,
       });
 
       setStatus("done");

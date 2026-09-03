@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "test": "node --test test/**/*.test.js",
+    "test:contract": "cargo test --manifest-path src/contracts/escrow-contract/Cargo.toml"
   },
   "dependencies": {
     "@stellar/stellar-sdk": "^12.0.0",

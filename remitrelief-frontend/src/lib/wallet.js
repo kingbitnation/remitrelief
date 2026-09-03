@@ -4,9 +4,14 @@ import {
   FreighterModule,
   AlbedoModule,
 } from "@creit.tech/stellar-wallets-kit";
+import { NETWORK_PASSPHRASE } from "./stellar.js";
+
+const NETWORK = (import.meta.env.VITE_STELLAR_NETWORK || "TESTNET").toUpperCase();
+const kitNetwork =
+  NETWORK === "FUTURENET" ? WalletNetwork.FUTURENET : WalletNetwork.TESTNET;
 
 export const kit = new StellarWalletsKit({
-  network: WalletNetwork.TESTNET,
+  network: kitNetwork,
   modules: [new FreighterModule(), new AlbedoModule()],
 });
 
@@ -33,7 +38,7 @@ export async function connectWallet() {
 export async function signTransaction(xdr, publicKey) {
   const { signedTxXdr } = await kit.signTransaction(xdr, {
     address: publicKey,
-    networkPassphrase: WalletNetwork.TESTNET,
+    networkPassphrase: NETWORK_PASSPHRASE,
   });
   return signedTxXdr;
 }

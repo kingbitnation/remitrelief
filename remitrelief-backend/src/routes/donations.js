@@ -1,55 +1,42 @@
 import { Router } from "express";
-import { recordDonation, listDonations, getCampaign } from "../data/store.js";
-import { buildDepositXdr } from "../services/soroban.js";
+import {
+  listDonations,
+  prepareDonation,
+  recordVerifiedDonation,
+} from "../services/donationsService.js";
+import { toErrorResponse } from "../lib/errors.js";
+import { logger } from "../lib/logger.js";
 
 const router = Router();
 
-/**
- * Prepare an unsigned Soroban deposit() transaction for the donor to sign.
- */
+/** Public: prepare unsigned deposit XDR */
 router.post("/prepare", async (req, res) => {
-  const { escrowAddress, donorPublicKey, amount } = req.body;
-  if (!escrowAddress || !donorPublicKey || !amount) {
-    return res.status(400).json({ error: "missing required fields" });
-  }
-
   try {
-    const amountStroops = Math.round(Number(amount) * 1e7);
-    const { unsignedXdr } = await buildDepositXdr({
-      escrowAddress,
-      donorPublicKey,
-      amountStroops,
-    });
-    res.json({ unsignedXdr, amountStroops });
+    const result = await prepareDonation(req.body || {});
+    res.json(result);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || "could not prepare deposit" });
+    logger.error("prepare donation failed", { reason: err.message });
+    const { status, body } = toErrorResponse(err);
+    res.status(status).json(body);
   }
 });
 
 /**
- * Record a completed donation (on-chain or demo) for dashboards + ledger.
+ * Record donation — verified on-chain, or demo-only when DEMO_MODE=true.
+ * Rejects forgeable client-only financial claims in production.
  */
-router.post("/", (req, res) => {
-  const { campaignId, donor, amount, txHash, status, message } = req.body;
-  if (!campaignId || !donor || !amount) {
-    return res.status(400).json({ error: "missing required fields" });
+router.post("/", async (req, res) => {
+  try {
+    const entry = await recordVerifiedDonation(req.body || {});
+    res.status(201).json(entry);
+  } catch (err) {
+    logger.error("record donation failed", { reason: err.message, code: err.code });
+    const { status, body } = toErrorResponse(err);
+    res.status(status).json(body);
   }
-  if (!getCampaign(campaignId)) {
-    return res.status(404).json({ error: "campaign not found" });
-  }
-
-  const entry = recordDonation({
-    campaignId,
-    donor,
-    amount: Number(amount),
-    txHash: txHash || null,
-    status: status || "escrowed",
-    message: message || "",
-  });
-  res.status(201).json(entry);
 });
 
+/** Public: donation history filters */
 router.get("/", (req, res) => {
   const { donor, campaignId } = req.query;
   res.json(listDonations({ donor, campaignId }));

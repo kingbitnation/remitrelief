@@ -327,6 +327,8 @@ export function createCampaign(input) {
     campaignId: campaign.id,
     actor: input.createdBy || "organizer",
     note: `Campaign created: ${campaign.name}`,
+    verifiedOnChain: false,
+    source: "application",
   });
   saveState();
   return { ...campaign };
@@ -348,6 +350,11 @@ export function setMilestonesVerified(campaignId, count) {
   return { ...campaign };
 }
 
+export function findDonationByTxHash(txHash) {
+  if (!txHash) return null;
+  return db.donations.find((d) => d.txHash === txHash) || null;
+}
+
 export function recordDonation({
   campaignId,
   donor,
@@ -355,6 +362,8 @@ export function recordDonation({
   txHash = null,
   status = "escrowed",
   message = "",
+  verifiedOnChain = false,
+  source = "application",
 }) {
   const entry = {
     id: uid("don"),
@@ -365,6 +374,8 @@ export function recordDonation({
     createdAt: new Date().toISOString(),
     status,
     message: String(message || "").slice(0, 200),
+    verifiedOnChain: Boolean(verifiedOnChain),
+    source,
   };
   db.donations.unshift(entry);
   bumpRaised(campaignId, amount);
@@ -375,6 +386,8 @@ export function recordDonation({
     actor: donor,
     txHash,
     note: message ? `Donation escrowed — “${entry.message}”` : "Donation escrowed",
+    verifiedOnChain: Boolean(verifiedOnChain),
+    source: verifiedOnChain ? "on_chain" : source || "demo",
   });
   return entry;
 }
@@ -388,11 +401,20 @@ export function listDonations({ donor, campaignId } = {}) {
 }
 
 export function appendLedger(event) {
+  const verifiedOnChain = Boolean(event.verifiedOnChain);
   const entry = {
     id: uid("led"),
     createdAt: new Date().toISOString(),
-    txHash: null,
-    ...event,
+    txHash: event.txHash ?? null,
+    type: event.type,
+    campaignId: event.campaignId,
+    amount: event.amount,
+    milestoneIndex: event.milestoneIndex,
+    actor: event.actor,
+    note: event.note,
+    proofNote: event.proofNote,
+    verifiedOnChain,
+    source: verifiedOnChain ? "on_chain" : event.source || "demo",
   };
   db.ledger.unshift(entry);
   saveState();

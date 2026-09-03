@@ -5,10 +5,22 @@ import {
   rpc,
 } from "@stellar/stellar-sdk";
 
+const NETWORK = (import.meta.env.VITE_STELLAR_NETWORK || "TESTNET").toUpperCase();
+
+function resolvePassphrase(network) {
+  if (network === "TESTNET") return Networks.TESTNET;
+  if (network === "PUBLIC" || network === "MAINNET") {
+    throw new Error("Mainnet is disabled in this build");
+  }
+  if (network === "FUTURENET") return "Test SDF Future Network ; October 2022";
+  // Default safely to testnet
+  return Networks.TESTNET;
+}
+
 const HORIZON_URL = import.meta.env.VITE_HORIZON_URL || "https://horizon-testnet.stellar.org";
 const SOROBAN_RPC_URL =
   import.meta.env.VITE_SOROBAN_RPC_URL || "https://soroban-testnet.stellar.org";
-const NETWORK_PASSPHRASE = Networks.TESTNET;
+export const NETWORK_PASSPHRASE = resolvePassphrase(NETWORK);
 
 export const horizon = new Horizon.Server(HORIZON_URL);
 export const sorobanServer = new rpc.Server(SOROBAN_RPC_URL, { allowHttp: false });

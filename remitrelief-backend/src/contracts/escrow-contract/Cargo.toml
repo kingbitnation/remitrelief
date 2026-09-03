@@ -2,12 +2,17 @@
 name = "escrow-contract"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+doctest = false
 
 [dependencies]
-soroban-sdk = "21.0.0"
+soroban-sdk = "=21.1.1"
+
+[dev-dependencies]
+soroban-sdk = { version = "=21.1.1", features = ["testutils"] }
 
 [profile.release]
 opt-level = "z"
@@ -18,3 +23,7 @@ debug-assertions = false
 panic = "abort"
 codegen-units = 1
 lto = true
+
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true

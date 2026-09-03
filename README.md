@@ -2,72 +2,76 @@
 
 # RemitRelief
 
-**Disaster-relief microdonations on Stellar** — donors send USDC to verified campaigns; funds sit in a per-campaign Soroban escrow and release to the recipient only when an authorized relief partner confirms a milestone (for example, “shelter distribution complete”). Every donation and payout is visible on a public transparency ledger.
+**Disaster-relief microdonations on Stellar** — donors send USDC to verified campaigns; funds sit in a per-campaign Soroban escrow and release to the recipient only when an authorized relief partner confirms a milestone. A public ledger distinguishes **on-chain verified** events from **demo/app** events.
 
-## Why Stellar
-
-- **Microdonations need tiny fees.** Sub-second finality and sub-cent network costs make small gifts practical, including cross-border.
-- **Stable unit of account.** USDC on Stellar gives donors a familiar USD amount without FX gymnastics in the UX.
-- **Programmable custody.** Soroban encodes the release condition in the escrow contract itself: funds move to a fixed recipient only after a verified milestone, instead of trusting an off-chain intermediary to hold the money.
-
-## How it works
-
-1. **Campaign setup** — A relief campaign is registered with a goal, milestones (description + tranche size), a recipient address, authorized verifiers (NGO partners), and a deployed escrow contract instance.
-2. **Donate** — A donor connects a Stellar wallet, picks a campaign, and deposits USDC into that campaign’s escrow via a Soroban `deposit` invocation.
-3. **Verify** — When on-the-ground work for a milestone is done, an authorized verifier confirms it on-chain (`verify_milestone`).
-4. **Release** — The matching tranche is released from escrow to the campaign recipient (`release`).
-5. **Transparency** — The backend indexes donations and milestone events so anyone can inspect a public ledger of activity.
-
-## Architecture
+## Architecture (current)
 
 ```
-┌─────────────────────┐     REST      ┌──────────────────────┐
-│  remitrelief-frontend│ ───────────► │  remitrelief-backend │
-│  React + Vite        │              │  Express + store     │
-└──────────┬──────────┘              └──────────┬───────────┘
-           │                                    │
-           │         Soroban RPC / Stellar      │
-           └────────────────┬───────────────────┘
-                            ▼
-                 ┌─────────────────────┐
-                 │  Escrow contract    │
-                 │  (per campaign)     │
-                 │  deposit / verify /  │
-                 │  release / balance  │
-                 └─────────────────────┘
+React SPA (Vite)
+      ↓ REST
+Express API
+  ├── routes → services → repositories → JSON store
+  └── blockchain/soroban (client, transactions, verification)
+      ↓
+Soroban escrow contract (testnet)
 ```
 
-This repository is a monorepo:
+Persistence today is a **file-backed JSON store** (`remitrelief-backend/data/store.json`, or `/tmp` on Vercel). PostgreSQL is planned for Phase 3 behind the repository interface — **SQLite is not used**.
 
 | Piece | Path | Role |
 |-------|------|------|
-| Frontend | `remitrelief-frontend/` | Campaign browsing, wallet connect, donate, ledger, verify UI |
-| Backend | `remitrelief-backend/` | Campaign/milestone/donation API, Soroban service, escrow contract |
-| Deploy | `api/` + `vercel.json` | Vercel serverless entry for the Express API + static UI |
+| Frontend | `remitrelief-frontend/` | Campaigns, donate, ledger, verify UI |
+| Backend | `remitrelief-backend/` | API, verification, escrow helpers |
+| Contract | `remitrelief-backend/src/contracts/escrow-contract/` | Milestone escrow |
+| Deploy adapter | `api/` + `vercel.json` | Serverless Express + static UI |
+
+## Security model (Phase 2.1)
+
+- **Demo mode** (`DEMO_MODE=true`) allows local fake donations/verify/release. Forced **off** when `NODE_ENV=production`.
+- **On-chain donations** require a successful Soroban `deposit` tx hash; the backend verifies before recording.
+- **Verify XDR** is checked for expected contract / function / args before submit.
+- **Standalone release** requires `x-internal-api-key: $INTERNAL_API_KEY`. After a validated verifier signature, verify may `autoRelease` server-side.
+- **`BACKEND_SIGNER_SECRET`** is backend-only — never expose via `VITE_*`.
 
 ## Quick start
 
 ```bash
 # API
-cd remitrelief-backend && npm install && npm run dev
+cd remitrelief-backend
+cp .env.example .env   # set DEMO_MODE=true for local demo flows
+npm install
+npm run dev
 
 # UI (separate terminal)
-cd remitrelief-frontend && npm install && npm run dev
+cd remitrelief-frontend
+npm install
+npm run dev
 ```
 
-Open the Vite URL (usually `http://localhost:5173`). Demo campaigns work without a deployed contract; set `DEMO_ESCROW_CONTRACT_ID` and `BACKEND_SIGNER_SECRET` for on-chain deposits.
+Open `http://localhost:5173`. Without a deployed escrow, campaigns use **demo mode**. For on-chain deposits set `DEMO_ESCROW_CONTRACT_ID`, `BACKEND_SIGNER_SECRET`, and `INTERNAL_API_KEY` (see `.env.example`).
 
-## Deploy
+## Tests
 
 ```bash
-npx vercel --prod
+cd remitrelief-backend
+npm test                 # Node security/config/service tests
+npm run test:contract    # Soroban escrow Rust tests (requires Rust + cargo)
 ```
 
-Same-origin API routes (`/campaigns`, `/donations`, `/ledger`, …) are rewritten to the serverless Express app.
+## Contract events
+
+Escrow emits Soroban events (topics):
+
+| Event | Topics | Data |
+|-------|--------|------|
+| init | `init`, recipient | token, verifier_count, milestone_count |
+| deposit | `deposit`, from | amount, total_deposited |
+| verify | `verify`, verifier, index | amount |
+| release | `release`, recipient, index | amount |
 
 ## Status
 
-Early-stage. **Stellar testnet only. Smart contracts and infrastructure are not audited. Do not use with real funds.**
+Early-stage / testnet. Smart contracts and infrastructure are **not audited**. Do not use with real funds. Mainnet is disabled in config.
 
 ## License
 

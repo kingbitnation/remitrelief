@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchCampaigns, prepareVerify, submitRelease, submitVerify } from "../lib/api";
+import { fetchCampaigns, prepareVerify, submitVerify } from "../lib/api";
 import { signTransaction } from "../lib/wallet";
 import MilestoneTimeline from "../components/MilestoneTimeline";
 import { useWallet } from "../context/WalletContext";
@@ -64,15 +64,7 @@ export default function VerifyPage() {
           verifierSignedXDR: signedXDR,
           campaignId: campaign.id,
           proofNote,
-        });
-
-        setStatus("releasing");
-        const label = campaign.milestoneLabels?.[milestoneIndex];
-        await submitRelease(campaign.id, {
-          escrowAddress: campaign.escrowAddress,
-          milestoneIndex: Number(milestoneIndex),
-          campaignId: campaign.id,
-          amount: label?.amount,
+          autoRelease: true,
         });
       } else {
         setStatus("verifying");
@@ -82,14 +74,7 @@ export default function VerifyPage() {
           verifierPublicKey,
           proofNote,
           demo: true,
-        });
-        setStatus("releasing");
-        const label = campaign.milestoneLabels?.[milestoneIndex];
-        await submitRelease(campaign.id, {
-          campaignId: campaign.id,
-          milestoneIndex: Number(milestoneIndex),
-          amount: label?.amount,
-          demo: true,
+          autoRelease: true,
         });
         setCampaigns((prev) =>
           prev.map((c) =>
@@ -197,8 +182,7 @@ export default function VerifyPage() {
               {status === "connecting" && "Connecting wallet…"}
               {status === "preparing" && "Preparing transaction…"}
               {status === "signing" && "Awaiting signature…"}
-              {status === "verifying" && "Recording verification…"}
-              {status === "releasing" && "Releasing funds…"}
+              {status === "verifying" && "Verifying & releasing…"}
               {status === "done" && "Complete ✓"}
               {status === "error" && "Try again"}
             </button>

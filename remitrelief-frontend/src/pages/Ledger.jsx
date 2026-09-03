@@ -36,8 +36,9 @@ export default function Ledger() {
           <p className="eyebrow">Public transparency</p>
           <h1>Relief ledger</h1>
           <p className="hero-copy">
-            A live trail of donations, milestone verifications, and escrow releases across all
-            campaigns.
+            Donations, verifications, and releases. Events marked{" "}
+            <strong>on-chain verified</strong> were confirmed against Soroban. Demo/app events are
+            local development records and are not blockchain proof.
           </p>
         </div>
       </section>
@@ -91,6 +92,13 @@ export default function Ledger() {
                     <p>{e.note}</p>
                     {e.proofNote && <p className="proof-note">Proof: {e.proofNote}</p>}
                     <div className="ledger-meta">
+                      <span
+                        className={`status-pill ${
+                          e.verifiedOnChain ? "status-released" : "status-pending"
+                        }`}
+                      >
+                        {e.verifiedOnChain ? "on-chain verified" : "demo / app event"}
+                      </span>
                       {e.amount != null && <span>${Number(e.amount).toLocaleString()}</span>}
                       {e.actor && <span>{shortenAddress(e.actor, 4)}</span>}
                       {e.txHash && (
