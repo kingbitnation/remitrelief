@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: remitrelief-backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: remitrelief-backend/package-lock.json
+      - run: npm ci
+      - run: npm test
+        env:
+          NODE_ENV: development
+          DEMO_MODE: "true"
+          STELLAR_NETWORK: TESTNET
+
+  frontend-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: remitrelief-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: remitrelief-frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  escrow-contract-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: remitrelief-backend/src/contracts/escrow-contract
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            remitrelief-backend/src/contracts/escrow-contract/target
+          key: ${{ runner.os }}-escrow-${{ hashFiles('remitrelief-backend/src/contracts/escrow-contract/Cargo.lock') }}
+      - name: Run contract tests
+        run: cargo test

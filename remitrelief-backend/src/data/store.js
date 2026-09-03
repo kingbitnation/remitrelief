@@ -117,8 +117,10 @@ const SEED = {
       amount: 250,
       txHash: null,
       createdAt: new Date(Date.now() - 1000 * 60 * 60 * 36).toISOString(),
-      status: "escrowed",
+      status: "demo-escrowed",
       message: "For the water kits",
+      verifiedOnChain: false,
+      source: "demo",
     },
     {
       id: "don-seed-2",
@@ -127,8 +129,10 @@ const SEED = {
       amount: 100,
       txHash: null,
       createdAt: new Date(Date.now() - 1000 * 60 * 60 * 12).toISOString(),
-      status: "escrowed",
+      status: "demo-escrowed",
       message: "",
+      verifiedOnChain: false,
+      source: "demo",
     },
     {
       id: "don-seed-3",
@@ -137,8 +141,10 @@ const SEED = {
       amount: 500,
       txHash: null,
       createdAt: new Date(Date.now() - 1000 * 60 * 60 * 8).toISOString(),
-      status: "escrowed",
+      status: "demo-escrowed",
       message: "Stay strong",
+      verifiedOnChain: false,
+      source: "demo",
     },
   ],
   ledger: [
@@ -151,6 +157,8 @@ const SEED = {
       txHash: null,
       createdAt: new Date(Date.now() - 1000 * 60 * 60 * 36).toISOString(),
       note: "Donation escrowed",
+      verifiedOnChain: false,
+      source: "demo",
     },
     {
       id: "led-2",
@@ -162,6 +170,8 @@ const SEED = {
       createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24).toISOString(),
       note: "Milestone 0 verified: Emergency kits staged",
       proofNote: "Photos uploaded by field team — 180 kits staged at warehouse B.",
+      verifiedOnChain: false,
+      source: "demo",
     },
     {
       id: "led-3",
@@ -173,6 +183,8 @@ const SEED = {
       txHash: null,
       createdAt: new Date(Date.now() - 1000 * 60 * 60 * 20).toISOString(),
       note: "Milestone 0 released to Cruz Roja Oaxaca",
+      verifiedOnChain: false,
+      source: "demo",
     },
     {
       id: "led-4",
@@ -183,6 +195,8 @@ const SEED = {
       txHash: null,
       createdAt: new Date(Date.now() - 1000 * 60 * 60 * 12).toISOString(),
       note: "Donation escrowed",
+      verifiedOnChain: false,
+      source: "demo",
     },
     {
       id: "led-5",
@@ -193,6 +207,8 @@ const SEED = {
       txHash: null,
       createdAt: new Date(Date.now() - 1000 * 60 * 60 * 8).toISOString(),
       note: "Donation escrowed",
+      verifiedOnChain: false,
+      source: "demo",
     },
   ],
 };

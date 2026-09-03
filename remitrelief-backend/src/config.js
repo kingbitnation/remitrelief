@@ -50,11 +50,8 @@ export function loadConfig({ fresh = false } = {}) {
   if (network === "PUBLIC" || network === "MAINNET") {
     throw new Error("UNSUPPORTED_NETWORK: mainnet is not enabled");
   }
-  if (!SUPPORTED_NETWORKS.has(network) && network !== "TESTNET") {
-    // Allow TESTNET always; others must be in the supported set
-    if (!SUPPORTED_NETWORKS.has(network)) {
-      throw new Error(`UNSUPPORTED_NETWORK: ${network}`);
-    }
+  if (!SUPPORTED_NETWORKS.has(network)) {
+    throw new Error(`UNSUPPORTED_NETWORK: ${network}`);
   }
 
   const demoModeRequested = envBool("DEMO_MODE", !isProduction);

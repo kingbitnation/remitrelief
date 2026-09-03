@@ -115,6 +115,30 @@ describe("donation recording security", () => {
       (err) => err.code === "TRANSACTION_NOT_VERIFIED" || /txHash required/.test(err.message)
     );
   });
+
+  it("rejects demo donation when production disables DEMO_MODE", async () => {
+    process.env.NODE_ENV = "production";
+    process.env.DEMO_MODE = "true";
+    process.env.STELLAR_NETWORK = "TESTNET";
+    const { resetConfigCache } = await import("../src/config.js");
+    resetConfigCache();
+    const { recordVerifiedDonation } = await import("../src/services/donationsService.js");
+
+    await assert.rejects(
+      () =>
+        recordVerifiedDonation({
+          campaignId: "wildfire-relief-california",
+          donor: "GTESTDONORXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+          amount: 9,
+          demo: true,
+        }),
+      (err) => err.code === "DEMO_MODE_DISABLED"
+    );
+
+    process.env.NODE_ENV = "development";
+    process.env.DEMO_MODE = "true";
+    resetConfigCache();
+  });
 });
 
 describe("release endpoint protection", () => {

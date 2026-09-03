@@ -163,7 +163,14 @@ export default function CampaignDetail() {
             {events.map((e) => (
               <li key={e.id}>
                 <div>
-                  <strong className="event-type">{e.type}</strong>
+                  <strong className="event-type">{e.type}</strong>{" "}
+                  <span
+                    className={`status-pill ${
+                      e.verifiedOnChain ? "status-released" : "status-pending"
+                    }`}
+                  >
+                    {e.verifiedOnChain ? "on-chain verified" : "demo / app event"}
+                  </span>
                   <p>{e.note}</p>
                   {e.proofNote && <p className="proof-note">Proof: {e.proofNote}</p>}
                 </div>

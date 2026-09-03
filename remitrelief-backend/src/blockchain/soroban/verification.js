@@ -1,3 +1,7 @@
+/**
+ * Extract invoke-host-function contract calls from a Transaction.
+ * Returns [{ contractId, functionName, args[] }]
+ */
 import { xdr, StrKey, Address, scValToNative } from "@stellar/stellar-sdk";
 import { AppError, ErrorCodes } from "../../lib/errors.js";
 import { logger } from "../../lib/logger.js";
@@ -5,104 +9,85 @@ import { getTransaction } from "./client.js";
 import { parseSignedTransaction } from "./transactions.js";
 import { loadConfig } from "../../config.js";
 
-/**
- * Extract invoke-host-function contract calls from a Transaction.
- * Returns [{ contractId, functionName, argsScVal[] }]
- */
+function contractIdFromScAddress(scAddress) {
+  try {
+    return Address.fromScAddress(scAddress).toString();
+  } catch {
+    try {
+      return StrKey.encodeContract(scAddress.contractId());
+    } catch {
+      return null;
+    }
+  }
+}
+
+function functionNameFromSymbol(sym) {
+  if (sym == null) return "";
+  if (typeof sym === "string") return sym;
+  try {
+    return sym.toString();
+  } catch {
+    return String(sym);
+  }
+}
+
+function parseInvokeContract(invoke) {
+  if (!invoke) return null;
+  const rawContract =
+    typeof invoke.contractAddress === "function"
+      ? invoke.contractAddress()
+      : invoke._attributes?.contractAddress;
+  const rawFn =
+    typeof invoke.functionName === "function"
+      ? invoke.functionName()
+      : invoke._attributes?.functionName;
+  const rawArgs =
+    typeof invoke.args === "function" ? invoke.args() : invoke._attributes?.args || [];
+
+  return {
+    contractId: contractIdFromScAddress(rawContract),
+    functionName: functionNameFromSymbol(rawFn),
+    args: rawArgs,
+  };
+}
+
 export function extractContractInvocations(tx) {
   const invocations = [];
-  for (const op of tx.operations) {
-    if (op.type !== "invokeHostFunction") continue;
-    const hostFn = op.func;
-    if (!hostFn) continue;
 
-    // SDK v12: op.func may already be parsed; also support raw XDR
-    let hostFunction = hostFn;
-    if (typeof hostFn.toXDR === "function" || hostFn._switch) {
-      hostFunction = hostFn;
-    }
+  for (const op of tx.operations || []) {
+    if (op.type !== "invokeHostFunction") continue;
+    const func = op.func;
+    if (!func) continue;
 
     try {
-      const switchName = hostFunction.switch?.()?.name || hostFunction._arm;
-      const isInvoke =
-        switchName === "hostFnTypeInvokeContract" ||
-        switchName === "invokeContract" ||
-        hostFunction.invokeContract != null ||
-        (typeof hostFunction.switch === "function" &&
-          hostFunction.switch() === xdr.HostFunctionType.hostFnTypeInvokeContract());
-
-      if (!isInvoke && !hostFunction.invokeContract && typeof hostFunction.invokeContract !== "function") {
-        // Try value path
-        const value =
-          typeof hostFunction.value === "function" ? hostFunction.value() : hostFunction.invokeContract?.();
-        if (!value) continue;
-      }
-
-      const invoke =
-        typeof hostFunction.invokeContract === "function"
-          ? hostFunction.invokeContract()
-          : hostFunction._value || hostFunction.value?.();
-
-      if (!invoke) continue;
-
-      const rawContract = typeof invoke.contractAddress === "function" ? invoke.contractAddress() : invoke._attributes?.contractAddress;
-      const rawFn = typeof invoke.functionName === "function" ? invoke.functionName() : invoke._attributes?.functionName;
-      const rawArgs = typeof invoke.args === "function" ? invoke.args() : invoke._attributes?.args || [];
-
-      let contractId;
-      try {
-        contractId = Address.fromScAddress(rawContract).toString();
-      } catch {
+      let invoke = null;
+      if (typeof func.invokeContract === "function") {
         try {
-          contractId = StrKey.encodeContract(rawContract.contractId());
+          invoke = func.invokeContract();
         } catch {
-          contractId = null;
+          invoke = null;
         }
       }
+      if (!invoke && typeof func.switch === "function") {
+        const kind = func.switch();
+        if (kind === xdr.HostFunctionType.hostFnTypeInvokeContract() || kind?.name === "hostFnTypeInvokeContract") {
+          invoke = typeof func.value === "function" ? func.value() : func._value;
+        }
+      }
+      if (!invoke && func._arm === "invokeContract") {
+        invoke = func._value;
+      }
 
-      const functionName =
-        typeof rawFn === "string"
-          ? rawFn
-          : rawFn?.toString?.() || String(rawFn || "");
-
-      invocations.push({
-        contractId,
-        functionName,
-        args: rawArgs,
-      });
+      const parsed = parseInvokeContract(invoke);
+      if (parsed?.contractId && parsed.functionName) {
+        invocations.push(parsed);
+      }
     } catch (err) {
       logger.debug("Could not parse invokeHostFunction op", { reason: err.message });
     }
   }
 
-  // Fallback: use operation convenience fields when present (stellar-sdk Operation objects)
-  if (!invocations.length) {
-    for (const op of tx.operations) {
-      if (op.type === "invokeHostFunction" && op.func) {
-        const parsed = tryParseFromOperationFields(op);
-        if (parsed) invocations.push(parsed);
-      }
-    }
-  }
-
   return invocations;
-}
-
-function tryParseFromOperationFields(op) {
-  // Some SDK builds expose auth / func differently — best-effort
-  try {
-    const func = op.func;
-    if (func?.switch?.().name === "hostFnTypeInvokeContract" || func?._arm === "invokeContract") {
-      const invoke = func.invokeContract();
-      const contractId = Address.fromScAddress(invoke.contractAddress()).toString();
-      const functionName = invoke.functionName().toString();
-      const args = invoke.args();
-      return { contractId, functionName, args };
-    }
-  } catch {
-    return null;
-  }
-  return null;
 }
 
 function scArgToNativeSafe(scVal) {
@@ -150,15 +135,11 @@ export function assertExpectedInvocation(tx, { escrowAddress, functionName, expe
   const natives = (match.args || []).map(scArgToNativeSafe);
 
   if (expectedArgs.address != null) {
-    const found = natives.find((a) => typeof a === "string" && a === expectedArgs.address);
-    if (!found && natives[0] !== expectedArgs.address) {
-      // Soft check — address might be first arg
-      const first = natives[0];
-      if (first && first !== expectedArgs.address) {
-        throw new AppError(ErrorCodes.INVALID_CONTRACT_CALL, "Invocation address argument mismatch", {
-          details: { expected: expectedArgs.address, got: first },
-        });
-      }
+    const first = natives[0];
+    if (first && first !== expectedArgs.address) {
+      throw new AppError(ErrorCodes.INVALID_CONTRACT_CALL, "Invocation address argument mismatch", {
+        details: { expected: expectedArgs.address, got: first },
+      });
     }
   }
 
@@ -223,7 +204,6 @@ export async function verifyDonationTransaction({
 
   const res = await waitForSuccessfulTransaction(txHash);
 
-  // Prefer envelope from getTransaction when available
   let tx = null;
   try {
     if (res.envelopeXdr) {
@@ -241,7 +221,6 @@ export async function verifyDonationTransaction({
       expectedArgs: { address: donorPublicKey, amountStroops },
     });
   } else {
-    // Fallback: success on-chain is required; warn that deep invoke parse was unavailable
     logger.warn("Donation verified by SUCCESS status only (envelope parse unavailable)", { txHash });
   }
 
