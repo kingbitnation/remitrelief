@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { fetchDonations, fetchCampaigns, fetchStats } from "../lib/api";
 import { shortenAddress } from "../lib/stellar";
+import { useAuth } from "../context/AuthContext";
 import { useWallet } from "../context/WalletContext";
 import { useToast } from "../context/ToastContext";
 
 export default function DonorDashboard() {
-  const { address, shortAddress, connect, disconnect, isConnected, connecting } = useWallet();
+  const { walletAddress, authenticated, login } = useAuth();
+  const { shortAddress, connect, disconnect, isConnected, connecting } = useWallet();
+  const address = walletAddress;
   const toast = useToast();
   const [donations, setDonations] = useState([]);
   const [campaigns, setCampaigns] = useState([]);

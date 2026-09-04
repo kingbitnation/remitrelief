@@ -6,6 +6,12 @@
 import { Networks } from "@stellar/stellar-sdk";
 
 const SUPPORTED_NETWORKS = new Set(["TESTNET", "FUTURENET", "STANDALONE"]);
+const DEV_CORS_DEFAULTS = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:4173",
+  "http://127.0.0.1:4173",
+];
 
 function envBool(name, defaultValue = false) {
   const raw = process.env[name];
@@ -19,6 +25,19 @@ function envRequired(name, { allowEmpty = false } = {}) {
     return null;
   }
   return value ?? "";
+}
+
+function parseCsv(...names) {
+  const set = new Set();
+  for (const name of names) {
+    const raw = process.env[name];
+    if (!raw) continue;
+    for (const part of raw.split(",")) {
+      const t = part.trim();
+      if (t) set.add(t);
+    }
+  }
+  return [...set];
 }
 
 function resolvePassphrase(network, explicit) {
@@ -36,6 +55,24 @@ function resolveExplorerBase(network) {
   if (network === "TESTNET") return "https://stellar.expert/explorer/testnet";
   if (network === "FUTURENET") return "https://stellar.expert/explorer/futurenet";
   return null;
+}
+
+function resolveStoreDriver() {
+  const explicit = (process.env.STORE_DRIVER || "").toLowerCase();
+  if (explicit === "postgres" || explicit === "json") return explicit;
+  if (process.env.DATABASE_URL) return "postgres";
+  return "json";
+}
+
+function resolveCorsOrigins(isProduction) {
+  const fromEnv = parseCsv("CORS_ORIGINS");
+  if (fromEnv.length) return fromEnv;
+  if (isProduction) {
+    throw new Error(
+      "CORS_ORIGINS is required in production (comma-separated allowlist; never reflect *)"
+    );
+  }
+  return [...DEV_CORS_DEFAULTS];
 }
 
 let cached = null;
@@ -58,11 +95,26 @@ export function loadConfig({ fresh = false } = {}) {
   const demoMode = isProduction ? false : demoModeRequested;
 
   if (isProduction && demoModeRequested) {
-    // Explicitly refuse demo financial mutations in production
     console.warn(
       "[config] DEMO_MODE was requested but NODE_ENV=production — demo financial mutations are DISABLED"
     );
   }
+
+  const storeDriver = resolveStoreDriver();
+  if (storeDriver === "postgres" && !process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is required when STORE_DRIVER=postgres");
+  }
+
+  const sessionSecret =
+    envRequired("AUTH_SESSION_SECRET", { allowEmpty: true }) ||
+    envRequired("AUTH_JWT_SECRET", { allowEmpty: true }) ||
+    (isProduction ? null : "dev-only-remitrelief-session-secret-change-me");
+
+  if (isProduction && !sessionSecret) {
+    throw new Error("AUTH_SESSION_SECRET (or AUTH_JWT_SECRET) is required in production");
+  }
+
+  const corsOrigins = resolveCorsOrigins(isProduction);
 
   const config = Object.freeze({
     nodeEnv,
@@ -70,6 +122,25 @@ export function loadConfig({ fresh = false } = {}) {
     port: Number(process.env.PORT || 4000),
     demoMode,
     allowStoreReset: envBool("ALLOW_STORE_RESET", false) && !isProduction,
+    storeDriver,
+    databaseUrl: process.env.DATABASE_URL || null,
+    corsOrigins,
+    auth: Object.freeze({
+      sessionSecret,
+      sessionTtlSec: Number(process.env.AUTH_SESSION_TTL || process.env.AUTH_TOKEN_TTL_SEC || 60 * 60 * 12),
+      challengeTtlSec: Number(process.env.AUTH_CHALLENGE_TTL || process.env.AUTH_CHALLENGE_TTL_SEC || 300),
+      cookieName: process.env.AUTH_COOKIE_NAME || "remitrelief_sid",
+      cookieSecure: envBool("AUTH_COOKIE_SECURE", isProduction),
+      cookieSameSite: process.env.AUTH_COOKIE_SAMESITE || (isProduction ? "lax" : "lax"),
+      domain: process.env.AUTH_DOMAIN || "remitrelief",
+      /** Dev-only insecure bypass — never enabled in production. */
+      allowInsecureDevBypass: envBool("AUTH_DEV_BYPASS", false) && !isProduction,
+    }),
+    rbac: Object.freeze({
+      adminPublicKeys: parseCsv("ADMIN_PUBLIC_KEYS", "OPERATOR_PUBLIC_KEYS"),
+      ngoPublicKeys: parseCsv("NGO_PUBLIC_KEYS", "VERIFIER_PUBLIC_KEYS"),
+      recipientPublicKeys: parseCsv("RECIPIENT_PUBLIC_KEYS"),
+    }),
 
     stellar: Object.freeze({
       network,
@@ -80,10 +151,8 @@ export function loadConfig({ fresh = false } = {}) {
       usdcDecimals: 7,
     }),
 
-    /** Never log or return this value. */
     secrets: Object.freeze({
       backendSignerSecret: envRequired("BACKEND_SIGNER_SECRET", { allowEmpty: true }),
-      /** Protects privileged release / internal ops until full RBAC exists. */
       internalApiKey: envRequired("INTERNAL_API_KEY", { allowEmpty: true }),
     }),
 
@@ -124,7 +193,6 @@ export function requireInternalApiKey(provided) {
   }
 }
 
-/** Public-safe config snapshot for /health diagnostics (no secrets). */
 export function publicConfig() {
   const cfg = loadConfig();
   return {
@@ -132,5 +200,8 @@ export function publicConfig() {
     demoMode: cfg.demoMode,
     explorerBase: cfg.stellar.explorerBase,
     rpcUrl: cfg.stellar.rpcUrl,
+    storeDriver: cfg.storeDriver,
+    authEnabled: true,
+    authMode: "wallet_session",
   };
 }

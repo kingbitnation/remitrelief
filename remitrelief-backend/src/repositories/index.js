@@ -1,29 +1,26 @@
 /**
- * Repository boundary over the JSON store.
- * Phase 3 can swap this for PostgreSQL without rewriting routes.
+ * Repository boundary — JSON (default) or Postgres when STORE_DRIVER/DATABASE_URL set.
  */
 
-import * as store from "../data/store.js";
+import { loadConfig } from "../config.js";
 
-export const campaignsRepo = {
-  list: (filters) => store.listCampaigns(filters),
-  getById: (id) => store.getCampaign(id),
-  create: (input) => store.createCampaign(input),
-  setMilestonesVerified: (id, count) => store.setMilestonesVerified(id, count),
-};
+const driver = (() => {
+  try {
+    return loadConfig().storeDriver;
+  } catch {
+    return "json";
+  }
+})();
 
-export const donationsRepo = {
-  list: (filters) => store.listDonations(filters),
-  findByTxHash: (txHash) => store.findDonationByTxHash(txHash),
-  create: (input) => store.recordDonation(input),
-};
+const impl =
+  driver === "postgres"
+    ? await import("./postgres/index.js")
+    : await import("./jsonRepos.js");
 
-export const ledgerRepo = {
-  list: (filters) => store.listLedger(filters),
-  append: (event) => store.appendLedger(event),
-};
-
-export const statsRepo = {
-  get: () => store.getStats(),
-  reset: () => store.resetStore(),
-};
+export const campaignsRepo = impl.campaignsRepo;
+export const donationsRepo = impl.donationsRepo;
+export const ledgerRepo = impl.ledgerRepo;
+export const statsRepo = impl.statsRepo;
+export const usersRepo = impl.usersRepo;
+export const sessionsRepo = impl.sessionsRepo;
+export const indexerRepo = impl.indexerRepo;

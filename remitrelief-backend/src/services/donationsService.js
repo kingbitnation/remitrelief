@@ -37,12 +37,17 @@ export async function recordVerifiedDonation({
   txHash,
   message = "",
   demo = false,
+  authenticatedPublicKey = null,
 }) {
   if (!campaignId || !donor || amount == null) {
     throw new AppError(ErrorCodes.INVALID_REQUEST, "missing required fields");
   }
 
-  const campaign = campaignsRepo.getById(campaignId);
+  if (authenticatedPublicKey && authenticatedPublicKey !== donor) {
+    throw new AppError(ErrorCodes.FORBIDDEN, "donor must match authenticated wallet");
+  }
+
+  const campaign = await campaignsRepo.getById(campaignId);
   if (!campaign) {
     throw new AppError(ErrorCodes.CAMPAIGN_NOT_FOUND, "campaign not found");
   }
@@ -73,7 +78,7 @@ export async function recordVerifiedDonation({
     throw new AppError(ErrorCodes.TRANSACTION_NOT_VERIFIED, "txHash required for on-chain donations");
   }
 
-  const existing = donationsRepo.findByTxHash(txHash);
+  const existing = await donationsRepo.findByTxHash(txHash);
   if (existing) {
     throw new AppError(ErrorCodes.DONATION_ALREADY_RECORDED, "donation already recorded for this tx");
   }
@@ -100,6 +105,6 @@ export async function recordVerifiedDonation({
   });
 }
 
-export function listDonations(filters) {
+export async function listDonations(filters) {
   return donationsRepo.list(filters);
 }

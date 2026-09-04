@@ -1,21 +1,24 @@
 import { Router } from "express";
 import { createCampaign, getCampaignDetail, getStats, listCampaigns } from "../services/campaignsService.js";
+import { requireAuth } from "../middleware/auth.js";
 import { toErrorResponse } from "../lib/errors.js";
 
 const router = Router();
 
 router.get("/", async (req, res) => {
   const { q, category, status } = req.query;
-  res.json(listCampaigns({ q, category, status }));
+  res.json(await listCampaigns({ q, category, status }));
 });
 
-router.get("/meta/stats", (_req, res) => {
-  res.json(getStats());
+router.get("/meta/stats", async (_req, res) => {
+  res.json(await getStats());
 });
 
-router.post("/", (req, res) => {
+router.post("/", requireAuth, async (req, res) => {
   try {
-    const campaign = createCampaign(req.body || {});
+    const campaign = await createCampaign(req.body || {}, {
+      publicKey: req.user.walletAddress,
+    });
     res.status(201).json(campaign);
   } catch (err) {
     const { status, body } = toErrorResponse(err);

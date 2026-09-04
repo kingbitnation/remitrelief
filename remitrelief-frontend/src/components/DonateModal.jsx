@@ -2,13 +2,13 @@ import { useState } from "react";
 import { signTransaction } from "../lib/wallet";
 import { submitSignedSorobanTx } from "../lib/stellar";
 import { prepareDeposit, recordDonation } from "../lib/api";
-import { useWallet } from "../context/WalletContext";
+import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 
 const PRESETS = [5, 10, 25, 50, 100];
 
 export default function DonateModal({ campaign, onClose, onSuccess }) {
-  const { ensureConnected } = useWallet();
+  const { ensureAuthenticated } = useAuth();
   const toast = useToast();
   const [amount, setAmount] = useState("25");
   const [message, setMessage] = useState("");
@@ -26,7 +26,7 @@ export default function DonateModal({ campaign, onClose, onSuccess }) {
     try {
       setFeedback("");
       setStatus("connecting");
-      const donorPublicKey = await ensureConnected();
+      const donorPublicKey = await ensureAuthenticated();
 
       let txHash = null;
       const hasEscrow = Boolean(campaign.escrowAddress);

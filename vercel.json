@@ -7,6 +7,10 @@
   "rewrites": [
     { "source": "/health", "destination": "/api" },
     { "source": "/stats", "destination": "/api" },
+    { "source": "/auth", "destination": "/api" },
+    { "source": "/auth/:path*", "destination": "/api" },
+    { "source": "/internal", "destination": "/api" },
+    { "source": "/internal/:path*", "destination": "/api" },
     { "source": "/campaigns", "destination": "/api" },
     { "source": "/campaigns/:path*", "destination": "/api" },
     { "source": "/donations", "destination": "/api" },
@@ -16,6 +20,12 @@
     { "source": "/ledger", "destination": "/api" },
     { "source": "/ledger/:path*", "destination": "/api" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
+  ],
+  "crons": [
+    {
+      "path": "/internal/indexer/run",
+      "schedule": "*/15 * * * *"
+    }
   ],
   "functions": {
     "api/index.js": {

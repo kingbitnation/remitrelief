@@ -4,15 +4,21 @@ import {
   prepareDonation,
   recordVerifiedDonation,
 } from "../services/donationsService.js";
+import { requireAuth } from "../middleware/auth.js";
 import { toErrorResponse } from "../lib/errors.js";
 import { logger } from "../lib/logger.js";
 
 const router = Router();
 
-/** Public: prepare unsigned deposit XDR */
-router.post("/prepare", async (req, res) => {
+router.post("/prepare", requireAuth, async (req, res) => {
   try {
-    const result = await prepareDonation(req.body || {});
+    const body = req.body || {};
+    const result = await prepareDonation({
+      escrowAddress: body.escrowAddress,
+      amount: body.amount,
+      // Identity from session only — ignore client donor fields
+      donorPublicKey: req.user.walletAddress,
+    });
     res.json(result);
   } catch (err) {
     logger.error("prepare donation failed", { reason: err.message });
@@ -21,13 +27,19 @@ router.post("/prepare", async (req, res) => {
   }
 });
 
-/**
- * Record donation — verified on-chain, or demo-only when DEMO_MODE=true.
- * Rejects forgeable client-only financial claims in production.
- */
-router.post("/", async (req, res) => {
+router.post("/", requireAuth, async (req, res) => {
   try {
-    const entry = await recordVerifiedDonation(req.body || {});
+    const body = req.body || {};
+    const entry = await recordVerifiedDonation({
+      campaignId: body.campaignId,
+      amount: body.amount,
+      txHash: body.txHash,
+      message: body.message,
+      demo: body.demo,
+      // Identity from authenticated session only
+      donor: req.user.walletAddress,
+      authenticatedPublicKey: req.user.walletAddress,
+    });
     res.status(201).json(entry);
   } catch (err) {
     logger.error("record donation failed", { reason: err.message, code: err.code });
@@ -36,10 +48,14 @@ router.post("/", async (req, res) => {
   }
 });
 
-/** Public: donation history filters */
-router.get("/", (req, res) => {
-  const { donor, campaignId } = req.query;
-  res.json(listDonations({ donor, campaignId }));
+/** Own donations: authenticated filter to session wallet unless ADMIN listing all via query omitted */
+router.get("/", requireAuth, async (req, res) => {
+  const { campaignId } = req.query;
+  const donor =
+    req.user.roles?.includes("ADMIN") && req.query.donor
+      ? req.query.donor
+      : req.user.walletAddress;
+  res.json(await listDonations({ donor, campaignId }));
 });
 
 export default router;

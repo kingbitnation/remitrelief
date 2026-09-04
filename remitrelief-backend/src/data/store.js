@@ -211,6 +211,10 @@ const SEED = {
       source: "demo",
     },
   ],
+  users: [],
+  authChallenges: [],
+  sessions: [],
+  indexedCursors: {},
 };
 
 const GRADIENTS = [
@@ -236,6 +240,10 @@ function loadState() {
   }
   try {
     const parsed = JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+    if (!parsed.users) parsed.users = [];
+    if (!parsed.authChallenges) parsed.authChallenges = [];
+    if (!parsed.sessions) parsed.sessions = [];
+    if (!parsed.indexedCursors) parsed.indexedCursors = {};
     if (DEMO_ESCROW) {
       const oaxaca = parsed.campaigns?.find((c) => c.id === "flood-relief-oaxaca");
       if (oaxaca) oaxaca.escrowAddress = DEMO_ESCROW;
@@ -416,7 +424,28 @@ export function listDonations({ donor, campaignId } = {}) {
   });
 }
 
+export function findLedgerEvent({ txHash, type, campaignId } = {}) {
+  if (!txHash || !type) return null;
+  return (
+    db.ledger.find(
+      (e) =>
+        e.txHash === txHash &&
+        e.type === type &&
+        (campaignId == null || e.campaignId === campaignId)
+    ) || null
+  );
+}
+
 export function appendLedger(event) {
+  if (event.txHash && event.type) {
+    const existing = findLedgerEvent({
+      txHash: event.txHash,
+      type: event.type,
+      campaignId: event.campaignId,
+    });
+    if (existing) return { ...existing, _duplicate: true };
+  }
+
   const verifiedOnChain = Boolean(event.verifiedOnChain);
   const entry = {
     id: uid("led"),
@@ -435,6 +464,223 @@ export function appendLedger(event) {
   db.ledger.unshift(entry);
   saveState();
   return entry;
+}
+
+function parseKeys(...envNames) {
+  const set = new Set();
+  for (const name of envNames) {
+    const raw = process.env[name] || "";
+    for (const part of raw.split(",")) {
+      const t = part.trim();
+      if (t) set.add(t);
+    }
+  }
+  return set;
+}
+
+function seedRolesFor(publicKey) {
+  const { Roles, normalizeRoles } = requireRoles();
+  const roles = new Set([Roles.DONOR]);
+  const admins = parseKeys("ADMIN_PUBLIC_KEYS", "OPERATOR_PUBLIC_KEYS");
+  const ngos = parseKeys("NGO_PUBLIC_KEYS", "VERIFIER_PUBLIC_KEYS");
+  const recipients = parseKeys("RECIPIENT_PUBLIC_KEYS");
+  if (admins.has(publicKey)) roles.add(Roles.ADMIN);
+  if (ngos.has(publicKey)) roles.add(Roles.NGO);
+  if (recipients.has(publicKey)) roles.add(Roles.RECIPIENT);
+  // DEMO only: empty NGO allowlist grants NGO so local verify UI works.
+  // This is NOT real authentication elevation in production (DEMO forced off).
+  const demo =
+    process.env.NODE_ENV !== "production" &&
+    (process.env.DEMO_MODE == null ||
+      ["1", "true", "yes", "on"].includes(String(process.env.DEMO_MODE).toLowerCase()));
+  if (demo && ngos.size === 0) roles.add(Roles.NGO);
+  return normalizeRoles([...roles]);
+}
+
+function requireRoles() {
+  // Local import avoids circular init with config; roles module is pure.
+  return {
+    Roles: {
+      DONOR: "DONOR",
+      RECIPIENT: "RECIPIENT",
+      NGO: "NGO",
+      ADMIN: "ADMIN",
+      UNASSIGNED: "UNASSIGNED",
+    },
+    normalizeRoles(roles = []) {
+      const map = {
+        donor: "DONOR",
+        organizer: "NGO",
+        verifier: "NGO",
+        operator: "ADMIN",
+        DONOR: "DONOR",
+        RECIPIENT: "RECIPIENT",
+        NGO: "NGO",
+        ADMIN: "ADMIN",
+        UNASSIGNED: "UNASSIGNED",
+      };
+      const set = new Set(
+        roles.map((r) => map[r] || map[String(r).toLowerCase()] || map[String(r).toUpperCase()] || "DONOR")
+      );
+      set.delete("UNASSIGNED");
+      if (!set.size) set.add("DONOR");
+      return [...set];
+    },
+  };
+}
+
+export function getUser(publicKey) {
+  if (!db.users) db.users = [];
+  const user = db.users.find((u) => u.publicKey === publicKey || u.walletAddress === publicKey);
+  if (!user) return null;
+  const { normalizeRoles } = requireRoles();
+  return {
+    id: user.id || user.publicKey,
+    publicKey: user.publicKey || user.walletAddress,
+    walletAddress: user.publicKey || user.walletAddress,
+    roles: normalizeRoles(user.roles || []),
+    status: user.status || "active",
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt || user.lastLoginAt,
+    lastLoginAt: user.lastLoginAt,
+  };
+}
+
+export function upsertUser(publicKey, { addRoles = [] } = {}) {
+  if (!db.users) db.users = [];
+  const { normalizeRoles } = requireRoles();
+  let user = db.users.find((u) => u.publicKey === publicKey);
+  if (!user) {
+    user = {
+      id: publicKey,
+      publicKey,
+      walletAddress: publicKey,
+      roles: seedRolesFor(publicKey),
+      status: "active",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      lastLoginAt: new Date().toISOString(),
+    };
+    db.users.push(user);
+  } else {
+    user.lastLoginAt = new Date().toISOString();
+    user.updatedAt = user.lastLoginAt;
+    user.roles = normalizeRoles([...(user.roles || []), ...seedRolesFor(publicKey)]);
+  }
+  if (addRoles.length) {
+    user.roles = normalizeRoles([...(user.roles || []), ...addRoles]);
+  }
+  saveState();
+  return getUser(publicKey);
+}
+
+export function addUserRole(publicKey, role) {
+  return upsertUser(publicKey, { addRoles: [role] });
+}
+
+export function saveAuthChallenge(row) {
+  if (!db.authChallenges) db.authChallenges = [];
+  db.authChallenges = db.authChallenges.filter(
+    (c) => c.publicKey !== row.publicKey && new Date(c.expiresAt).getTime() > Date.now()
+  );
+  const entry = {
+    ...row,
+    used: false,
+    createdAt: new Date().toISOString(),
+  };
+  db.authChallenges.push(entry);
+  saveState();
+  return { ...entry };
+}
+
+export function getAuthChallenge(publicKey, nonce) {
+  if (!db.authChallenges) db.authChallenges = [];
+  return db.authChallenges.find((c) => c.publicKey === publicKey && c.nonce === nonce) || null;
+}
+
+export function consumeAuthChallenge(publicKey, nonce) {
+  if (!db.authChallenges) db.authChallenges = [];
+  const idx = db.authChallenges.findIndex((c) => c.publicKey === publicKey && c.nonce === nonce);
+  if (idx < 0) return null;
+  const row = db.authChallenges[idx];
+  if (row.used) return { ...row, _alreadyUsed: true };
+  row.used = true;
+  db.authChallenges.splice(idx, 1);
+  saveState();
+  return { ...row };
+}
+
+export function createSession({
+  id,
+  userId,
+  walletAddress,
+  roles,
+  expiresAt,
+}) {
+  if (!db.sessions) db.sessions = [];
+  const session = {
+    id,
+    userId,
+    walletAddress,
+    roles: [...(roles || [])],
+    createdAt: new Date().toISOString(),
+    expiresAt,
+    revokedAt: null,
+    lastUsedAt: new Date().toISOString(),
+  };
+  db.sessions.push(session);
+  saveState();
+  return { ...session };
+}
+
+export function findSession(id) {
+  if (!db.sessions || !id) return null;
+  const session = db.sessions.find((s) => s.id === id);
+  return session ? { ...session, roles: [...(session.roles || [])] } : null;
+}
+
+export function touchSession(id) {
+  if (!db.sessions) return null;
+  const session = db.sessions.find((s) => s.id === id);
+  if (!session) return null;
+  session.lastUsedAt = new Date().toISOString();
+  saveState();
+  return { ...session };
+}
+
+export function revokeSession(id) {
+  if (!db.sessions) return null;
+  const session = db.sessions.find((s) => s.id === id);
+  if (!session) return null;
+  session.revokedAt = new Date().toISOString();
+  saveState();
+  return { ...session };
+}
+
+export function revokeAllSessionsForUser(userId) {
+  if (!db.sessions) return 0;
+  let n = 0;
+  const now = new Date().toISOString();
+  for (const s of db.sessions) {
+    if ((s.userId === userId || s.walletAddress === userId) && !s.revokedAt) {
+      s.revokedAt = now;
+      n += 1;
+    }
+  }
+  saveState();
+  return n;
+}
+
+export function getIndexerCursor(key) {
+  if (!db.indexedCursors) db.indexedCursors = {};
+  return db.indexedCursors[key] || null;
+}
+
+export function setIndexerCursor(key, value) {
+  if (!db.indexedCursors) db.indexedCursors = {};
+  db.indexedCursors[key] = value;
+  saveState();
+  return value;
 }
 
 export function listLedger({ campaignId, type, limit = 50 } = {}) {
@@ -463,8 +709,20 @@ export function getStats() {
 }
 
 export function resetStore() {
-  Object.assign(db, structuredClone(SEED));
+  const next = structuredClone(SEED);
+  next.users = [];
+  next.authChallenges = [];
+  next.sessions = [];
+  next.indexedCursors = {};
+  Object.assign(db, next);
   db.campaigns[0].escrowAddress = DEMO_ESCROW;
   saveState();
   return getStats();
+}
+
+/** Exposed for postgres seed parity */
+export function getSeedSnapshot() {
+  const seed = structuredClone(SEED);
+  seed.campaigns[0].escrowAddress = DEMO_ESCROW;
+  return seed;
 }

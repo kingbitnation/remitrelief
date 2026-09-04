@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { fetchCampaigns, prepareVerify, submitVerify } from "../lib/api";
 import { signTransaction } from "../lib/wallet";
 import MilestoneTimeline from "../components/MilestoneTimeline";
-import { useWallet } from "../context/WalletContext";
+import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 
 export default function VerifyPage() {
-  const { ensureConnected } = useWallet();
+  const { ensureAuthenticated } = useAuth();
   const toast = useToast();
   const [campaigns, setCampaigns] = useState([]);
   const [campaignId, setCampaignId] = useState("");
@@ -42,7 +42,7 @@ export default function VerifyPage() {
 
     try {
       setStatus("connecting");
-      const verifierPublicKey = await ensureConnected();
+      const verifierPublicKey = await ensureAuthenticated();
       const hasEscrow = Boolean(campaign.escrowAddress);
 
       if (hasEscrow) {

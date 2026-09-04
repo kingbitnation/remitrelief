@@ -1,14 +1,14 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { createCampaign } from "../lib/api";
-import { useWallet } from "../context/WalletContext";
+import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 
 const EMPTY_MILESTONE = { label: "", amount: "" };
 
 export default function CreateCampaign() {
   const navigate = useNavigate();
-  const { address, ensureConnected } = useWallet();
+  const { ensureAuthenticated } = useAuth();
   const toast = useToast();
   const [form, setForm] = useState({
     name: "",
@@ -58,13 +58,7 @@ export default function CreateCampaign() {
 
     try {
       setStatus("submitting");
-      let createdBy = address;
-      try {
-        createdBy = await ensureConnected();
-      } catch {
-        // Allow anonymous create for demo
-        createdBy = null;
-      }
+      const createdBy = await ensureAuthenticated();
 
       const campaign = await createCampaign({
         ...form,

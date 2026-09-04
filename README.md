@@ -2,76 +2,76 @@
 
 # RemitRelief
 
-**Disaster-relief microdonations on Stellar** — donors send USDC to verified campaigns; funds sit in a per-campaign Soroban escrow and release to the recipient only when an authorized relief partner confirms a milestone. A public ledger distinguishes **on-chain verified** events from **demo/app** events.
+**Disaster-relief microdonations on Stellar** — donors send USDC to verified campaigns; funds sit in a per-campaign Soroban escrow and release to the recipient only when an authorized relief partner confirms a milestone.
 
-## Architecture (current)
+## Authentication Architecture
+
+```text
+Wallet Connected  ≠  RemitRelief Authenticated
+
+Connect wallet
+   → POST /auth/challenge  (server nonce + network-bound message)
+   → Wallet signs message (no on-chain tx)
+   → POST /auth/verify     (signature check → SessionRepository.create)
+   → HttpOnly cookie (+ Bearer fallback)
+   → requireAuth / requireRole / requirePermission / requireOwnership
+```
+
+| Concept | Meaning |
+|---------|---------|
+| **Wallet connected** | Browser extension selected an address |
+| **Authenticated** | Server verified a signature and issued a **revocable session** |
+
+Roles: `DONOR` (default) · `RECIPIENT` · `NGO` · `ADMIN`  
+Permissions live in `src/auth/permissions.js`. New wallets are never `ADMIN`.
+
+### Auth API
+
+| Method | Path | Notes |
+|--------|------|-------|
+| POST | `/auth/challenge` | Rate-limited; returns signable message |
+| POST | `/auth/verify` | Sets session cookie; returns user + sessionId |
+| GET | `/auth/me` | Current session |
+| POST | `/auth/logout` | Revokes session + clears cookie |
+
+### Protected vs public
+
+- **Public:** `GET /health`, `/stats`, `/campaigns`, `/campaigns/:id`, `/ledger`
+- **Authenticated:** `POST /campaigns`, `/donations`, `/donations/prepare`, `GET /donations`
+- **NGO / ADMIN:** milestone prepare-verify + verify
+- **ADMIN or internal key:** standalone release; ledger reset also needs `ALLOW_STORE_RESET` (dev only)
+
+Donor identity on donations is taken from the **session**, not the request body.
+
+## Architecture
 
 ```
-React SPA (Vite)
-      ↓ REST
-Express API
-  ├── routes → services → repositories → JSON store
-  └── blockchain/soroban (client, transactions, verification)
-      ↓
-Soroban escrow contract (testnet)
+React (WalletContext + AuthContext)
+  → Express (helmet, CORS allowlist, cookie sessions)
+    → services → repositories → JSON (default) or Postgres adapter
+    → blockchain/soroban
 ```
 
-Persistence today is a **file-backed JSON store** (`remitrelief-backend/data/store.json`, or `/tmp` on Vercel). PostgreSQL is planned for Phase 3 behind the repository interface — **SQLite is not used**.
-
-| Piece | Path | Role |
-|-------|------|------|
-| Frontend | `remitrelief-frontend/` | Campaigns, donate, ledger, verify UI |
-| Backend | `remitrelief-backend/` | API, verification, escrow helpers |
-| Contract | `remitrelief-backend/src/contracts/escrow-contract/` | Milestone escrow |
-| Deploy adapter | `api/` + `vercel.json` | Serverless Express + static UI |
-
-## Security model (Phase 2.1)
-
-- **Demo mode** (`DEMO_MODE=true`) allows local fake donations/verify/release. Forced **off** when `NODE_ENV=production`.
-- **On-chain donations** require a successful Soroban `deposit` tx hash; the backend verifies before recording.
-- **Verify XDR** is checked for expected contract / function / args before submit.
-- **Standalone release** requires `x-internal-api-key: $INTERNAL_API_KEY`. After a validated verifier signature, verify may `autoRelease` server-side.
-- **`BACKEND_SIGNER_SECRET`** is backend-only — never expose via `VITE_*`.
+Persistence default is JSON. Optional `STORE_DRIVER=postgres` + `DATABASE_URL` prepares for Phase 3 — full Prisma migration is **not** in this phase.
 
 ## Quick start
 
 ```bash
-# API
-cd remitrelief-backend
-cp .env.example .env   # set DEMO_MODE=true for local demo flows
-npm install
-npm run dev
-
-# UI (separate terminal)
-cd remitrelief-frontend
-npm install
-npm run dev
+cd remitrelief-backend && cp .env.example .env && npm install && npm run dev
+cd remitrelief-frontend && npm install && npm run dev
 ```
 
-Open `http://localhost:5173`. Without a deployed escrow, campaigns use **demo mode**. For on-chain deposits set `DEMO_ESCROW_CONTRACT_ID`, `BACKEND_SIGNER_SECRET`, and `INTERNAL_API_KEY` (see `.env.example`).
+Open `http://localhost:5173`. Connect a wallet and approve the **sign-in** message.
 
 ## Tests
 
 ```bash
-cd remitrelief-backend
-npm test                 # Node security/config/service tests
-npm run test:contract    # Soroban escrow Rust tests (requires Rust + cargo)
+cd remitrelief-backend && npm test
 ```
-
-## Contract events
-
-Escrow emits Soroban events (topics):
-
-| Event | Topics | Data |
-|-------|--------|------|
-| init | `init`, recipient | token, verifier_count, milestone_count |
-| deposit | `deposit`, from | amount, total_deposited |
-| verify | `verify`, verifier, index | amount |
-| release | `release`, recipient, index | amount |
 
 ## Status
 
-Early-stage / testnet. Smart contracts and infrastructure are **not audited**. Do not use with real funds. Mainnet is disabled in config.
+Testnet only. Not audited. Do not use with real funds.
 
 ## License
 

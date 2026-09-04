@@ -8,6 +8,8 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
+      "/auth": "http://localhost:4000",
+      "/internal": "http://localhost:4000",
       "/campaigns": "http://localhost:4000",
       "/donations": "http://localhost:4000",
       "/milestones": "http://localhost:4000",

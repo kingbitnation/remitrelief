@@ -34,7 +34,7 @@ export async function verifyMilestone({
   autoRelease = true,
 }) {
   const cid = campaignId || id;
-  const campaign = campaignsRepo.getById(cid);
+  const campaign = await campaignsRepo.getById(cid);
   const wantsDemo = Boolean(demo) || !escrowAddress;
 
   if (wantsDemo) {
@@ -45,9 +45,9 @@ export async function verifyMilestone({
         Number(campaign.milestonesTotal),
         Math.max(Number(campaign.milestonesVerified), Number(milestoneIndex) + 1)
       );
-      campaignsRepo.setMilestonesVerified(campaign.id, next);
+      await campaignsRepo.setMilestonesVerified(campaign.id, next);
     }
-    const event = ledgerRepo.append({
+    const event = await ledgerRepo.append({
       type: "verify",
       campaignId: cid,
       milestoneIndex: Number(milestoneIndex),
@@ -78,7 +78,6 @@ export async function verifyMilestone({
     throw new AppError(ErrorCodes.INVALID_REQUEST, "missing required fields for on-chain verify");
   }
 
-  // Validate XDR content before submitting
   verifyMilestoneVerificationTransaction({
     signedXdr: verifierSignedXDR,
     escrowAddress,
@@ -99,10 +98,10 @@ export async function verifyMilestone({
       Number(campaign.milestonesTotal),
       Math.max(Number(campaign.milestonesVerified), Number(milestoneIndex) + 1)
     );
-    campaignsRepo.setMilestonesVerified(campaign.id, next);
+    await campaignsRepo.setMilestonesVerified(campaign.id, next);
   }
 
-  const event = ledgerRepo.append({
+  const event = await ledgerRepo.append({
     type: "verify",
     campaignId: cid,
     milestoneIndex: Number(milestoneIndex),
@@ -116,7 +115,6 @@ export async function verifyMilestone({
 
   let releaseResult = null;
   if (autoRelease) {
-    // After a validated verifier signature, backend may release without separate public call.
     releaseResult = await releaseMilestone({
       id,
       escrowAddress,
@@ -139,7 +137,7 @@ export async function verifyMilestone({
 /**
  * Privileged release.
  * - demo: DEMO_MODE only
- * - real: requires internalAuthorized (from verified auto-release) OR INTERNAL_API_KEY
+ * - real: requires internalAuthorized OR INTERNAL_API_KEY OR operatorAuthorized
  */
 export async function releaseMilestone({
   id,
@@ -150,13 +148,14 @@ export async function releaseMilestone({
   amount,
   internalApiKey,
   internalAuthorized = false,
+  operatorAuthorized = false,
 }) {
   const cid = campaignId || id;
   const wantsDemo = Boolean(demo) || !escrowAddress;
 
   if (wantsDemo) {
     assertDemoModeAllowed();
-    const event = ledgerRepo.append({
+    const event = await ledgerRepo.append({
       type: "release",
       campaignId: cid,
       milestoneIndex: Number(milestoneIndex),
@@ -173,7 +172,7 @@ export async function releaseMilestone({
     throw new AppError(ErrorCodes.INVALID_REQUEST, "missing required fields");
   }
 
-  if (!internalAuthorized) {
+  if (!internalAuthorized && !operatorAuthorized) {
     requireInternalApiKey(internalApiKey);
   }
 
@@ -183,7 +182,7 @@ export async function releaseMilestone({
     milestoneIndex: Number(milestoneIndex),
   });
 
-  const event = ledgerRepo.append({
+  const event = await ledgerRepo.append({
     type: "release",
     campaignId: cid,
     milestoneIndex: Number(milestoneIndex),

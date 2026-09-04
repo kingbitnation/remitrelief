@@ -42,3 +42,21 @@ export async function signTransaction(xdr, publicKey) {
   });
   return signedTxXdr;
 }
+
+/**
+ * Sign an auth challenge message. Returns base64 signature string.
+ */
+export async function signMessage(message, publicKey) {
+  if (typeof kit.signMessage !== "function") {
+    throw new Error("Connected wallet does not support message signing");
+  }
+  const result = await kit.signMessage(message, { address: publicKey });
+  const signature =
+    result?.signedMessage ||
+    result?.signature ||
+    (typeof result === "string" ? result : null);
+  if (!signature) {
+    throw new Error("Wallet did not return a message signature");
+  }
+  return signature;
+}

@@ -1,10 +1,14 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { connectWallet as openWalletModal } from "../lib/wallet";
+import { connectWallet as openWalletModal, signMessage } from "../lib/wallet";
 import { shortenAddress } from "../lib/stellar";
 
 const STORAGE_KEY = "remitrelief_donor";
 const WalletContext = createContext(null);
 
+/**
+ * Wallet connection only — does NOT mean RemitRelief authenticated.
+ * Use AuthContext for session/login state.
+ */
 export function WalletProvider({ children }) {
   const [address, setAddress] = useState(() => localStorage.getItem(STORAGE_KEY) || "");
   const [connecting, setConnecting] = useState(false);
@@ -40,6 +44,11 @@ export function WalletProvider({ children }) {
     return connect();
   }
 
+  async function signAuthMessage(message) {
+    const pk = await ensureConnected();
+    return signMessage(message, pk);
+  }
+
   return (
     <WalletContext.Provider
       value={{
@@ -50,6 +59,7 @@ export function WalletProvider({ children }) {
         connect,
         disconnect,
         ensureConnected,
+        signAuthMessage,
         isConnected: Boolean(address),
       }}
     >
