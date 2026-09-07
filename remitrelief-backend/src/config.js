@@ -57,10 +57,25 @@ function resolveExplorerBase(network) {
   return null;
 }
 
-function resolveStoreDriver() {
+function resolveStoreDriver(isProduction) {
   const explicit = (process.env.STORE_DRIVER || "").toLowerCase();
-  if (explicit === "postgres" || explicit === "json") return explicit;
-  if (process.env.DATABASE_URL) return "postgres";
+  if (explicit === "json") {
+    if (isProduction) {
+      throw new Error("STORE_DRIVER=json is not allowed in production — use PostgreSQL/Prisma");
+    }
+    return "json";
+  }
+  if (explicit === "postgres" || explicit === "prisma") {
+    if (!process.env.DATABASE_URL) {
+      throw new Error("DATABASE_URL is required when STORE_DRIVER=postgres|prisma");
+    }
+    return "prisma";
+  }
+  if (process.env.DATABASE_URL) return "prisma";
+  if (isProduction) {
+    throw new Error("DATABASE_URL is required in production (PostgreSQL via Prisma)");
+  }
+  // Local/tests without DATABASE_URL: JSON only (explicit offline mode)
   return "json";
 }
 
@@ -100,9 +115,9 @@ export function loadConfig({ fresh = false } = {}) {
     );
   }
 
-  const storeDriver = resolveStoreDriver();
-  if (storeDriver === "postgres" && !process.env.DATABASE_URL) {
-    throw new Error("DATABASE_URL is required when STORE_DRIVER=postgres");
+  const storeDriver = resolveStoreDriver(isProduction);
+  if ((storeDriver === "postgres" || storeDriver === "prisma") && !process.env.DATABASE_URL) {
+    throw new Error("DATABASE_URL is required when using Prisma/PostgreSQL");
   }
 
   const sessionSecret =

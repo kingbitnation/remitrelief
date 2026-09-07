@@ -1,0 +1,309 @@
+// RemitRelief Phase 3 — PostgreSQL via Prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  UNASSIGNED
+  DONOR
+  RECIPIENT
+  NGO
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  PENDING
+  DEACTIVATED
+}
+
+enum OrgStatus {
+  PENDING
+  VERIFIED
+  SUSPENDED
+  REJECTED
+}
+
+enum OrgMemberRole {
+  OWNER
+  MANAGER
+  VERIFIER
+  MEMBER
+}
+
+enum LedgerSource {
+  DEMO
+  APPLICATION
+  ON_CHAIN
+}
+
+enum TxStatus {
+  PREPARED
+  SUBMITTED
+  CONFIRMED
+  FAILED
+  REJECTED
+}
+
+model User {
+  id            String     @id @default(cuid())
+  walletAddress String     @unique @map("wallet_address")
+  role          UserRole   @default(DONOR)
+  /// Multi-role support (JSON array); `role` is primary/display role
+  roles         Json       @default("[\"DONOR\"]")
+  status        UserStatus @default(ACTIVE)
+  createdAt     DateTime   @default(now()) @map("created_at")
+  updatedAt     DateTime   @updatedAt @map("updated_at")
+  lastLoginAt   DateTime?  @map("last_login_at")
+
+  profile       Profile?
+  sessions      Session[]
+  challenges    AuthChallenge[]
+  auditLogs     AuditLog[]
+  memberships   OrganizationMember[]
+  campaigns     Campaign[]           @relation("CampaignCreator")
+  donations     Donation[]
+
+  @@index([role])
+  @@index([status])
+  @@map("users")
+}
+
+model Profile {
+  id          String   @id @default(cuid())
+  userId      String   @unique @map("user_id")
+  displayName String?  @map("display_name")
+  avatarUrl   String?  @map("avatar_url")
+  bio         String?
+  country     String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+model Session {
+  id           String    @id @default(cuid())
+  /// SHA-256 hash of the cookie/bearer token — never store raw session secret
+  tokenHash    String    @unique @map("token_hash")
+  userId       String    @map("user_id")
+  walletAddress String   @map("wallet_address")
+  roles        Json      @default("[\"DONOR\"]")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  expiresAt    DateTime  @map("expires_at")
+  revokedAt    DateTime? @map("revoked_at")
+  lastUsedAt   DateTime? @map("last_used_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("sessions")
+}
+
+model AuthChallenge {
+  id            String   @id @default(cuid())
+  userId        String?  @map("user_id")
+  walletAddress String   @map("wallet_address")
+  nonce         String
+  message       String
+  domain        String?
+  network       String?
+  issuedAt      DateTime @map("issued_at")
+  expiresAt     DateTime @map("expires_at")
+  usedAt        DateTime? @map("used_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([walletAddress, nonce])
+  @@index([expiresAt])
+  @@map("auth_challenges")
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  userId       String?  @map("user_id")
+  action       String
+  resourceType String?  @map("resource_type")
+  resourceId   String?  @map("resource_id")
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent")
+  metadata     Json?
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+model Organization {
+  id            String    @id @default(cuid())
+  name          String
+  slug          String    @unique
+  description   String?
+  walletAddress String?   @map("wallet_address")
+  status        OrgStatus @default(PENDING)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  members   OrganizationMember[]
+  campaigns Campaign[]
+
+  @@index([status])
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String        @id @default(cuid())
+  organizationId String        @map("organization_id")
+  userId         String        @map("user_id")
+  role           OrgMemberRole @default(MEMBER)
+  status         String        @default("ACTIVE")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@index([organizationId])
+  @@map("organization_members")
+}
+
+model Campaign {
+  id                  String   @id
+  name                String
+  location            String
+  description         String?
+  category            String?
+  goal                Decimal  @db.Decimal(20, 7)
+  raised              Decimal  @default(0) @db.Decimal(20, 7)
+  milestonesTotal     Int      @default(0) @map("milestones_total")
+  milestonesVerified  Int      @default(0) @map("milestones_verified")
+  escrowAddress       String?  @map("escrow_address")
+  usdcIssuer          String?  @map("usdc_issuer")
+  recipientName       String?  @map("recipient_name")
+  imageGradient       String?  @map("image_gradient")
+  status              String   @default("active")
+  createdAt           DateTime @default(now()) @map("created_at")
+  createdByWallet     String?  @map("created_by_wallet")
+  createdByUserId     String?  @map("created_by_user_id")
+  organizationId      String?  @map("organization_id")
+  milestoneLabels     Json     @default("[]") @map("milestone_labels")
+
+  creator       User?         @relation("CampaignCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  organization  Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  donations     Donation[]
+  milestones    Milestone[]
+  ledgerEvents  LedgerEvent[]
+  transactions  BlockchainTransaction[]
+
+  @@index([status])
+  @@index([category])
+  @@index([createdByUserId])
+  @@map("campaigns")
+}
+
+model Milestone {
+  id         String   @id @default(cuid())
+  campaignId String   @map("campaign_id")
+  index      Int
+  label      String
+  amount     Decimal  @db.Decimal(20, 7)
+  verified   Boolean  @default(false)
+  released   Boolean  @default(false)
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, index])
+  @@index([campaignId])
+  @@map("milestones")
+}
+
+model Donation {
+  id              String   @id @default(cuid())
+  campaignId      String   @map("campaign_id")
+  donorWallet     String   @map("donor_wallet")
+  donorUserId     String?  @map("donor_user_id")
+  amount          Decimal  @db.Decimal(20, 7)
+  txHash          String?  @unique @map("tx_hash")
+  status          String?
+  message         String?
+  verifiedOnChain Boolean  @default(false) @map("verified_on_chain")
+  source          LedgerSource @default(APPLICATION)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  campaign Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  donor    User?    @relation(fields: [donorUserId], references: [id], onDelete: SetNull)
+  transactions BlockchainTransaction[]
+
+  @@index([campaignId])
+  @@index([donorWallet])
+  @@index([donorUserId])
+  @@map("donations")
+}
+
+model LedgerEvent {
+  id              String       @id @default(cuid())
+  type            String
+  campaignId      String?      @map("campaign_id")
+  amount          Decimal?     @db.Decimal(20, 7)
+  milestoneIndex  Int?         @map("milestone_index")
+  actor           String?
+  txHash          String?      @map("tx_hash")
+  note            String?
+  proofNote       String?      @map("proof_note")
+  verifiedOnChain Boolean      @default(false) @map("verified_on_chain")
+  source          LedgerSource @default(DEMO)
+  createdAt       DateTime     @default(now()) @map("created_at")
+
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([campaignId, type])
+  @@unique([txHash, type, campaignId])
+  @@index([createdAt])
+  @@map("ledger_events")
+}
+
+model BlockchainTransaction {
+  id              String   @id @default(cuid())
+  txHash          String   @unique @map("tx_hash")
+  network         String
+  contractAddress String?  @map("contract_address")
+  operation       String?
+  status          TxStatus @default(SUBMITTED)
+  campaignId      String?  @map("campaign_id")
+  donationId      String?  @map("donation_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  confirmedAt     DateTime? @map("confirmed_at")
+
+  campaign Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  donation Donation? @relation(fields: [donationId], references: [id], onDelete: SetNull)
+
+  @@index([campaignId])
+  @@index([status])
+  @@map("blockchain_transactions")
+}
+
+model IndexedCursor {
+  cursorKey   String   @id @map("cursor_key")
+  cursorValue String   @map("cursor_value")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("indexed_cursors")
+}

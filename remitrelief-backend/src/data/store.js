@@ -1,3 +1,8 @@
+/**
+ * JSON file store — Phase 3 offline/test fixture only.
+ * Production persistence is Prisma → PostgreSQL (STORE_DRIVER=prisma + DATABASE_URL).
+ * Do not use store.json as the durable production path.
+ */
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -531,32 +536,38 @@ function requireRoles() {
 
 export function getUser(publicKey) {
   if (!db.users) db.users = [];
-  const user = db.users.find((u) => u.publicKey === publicKey || u.walletAddress === publicKey);
+  const user = db.users.find(
+    (u) => u.publicKey === publicKey || u.walletAddress === publicKey || u.id === publicKey
+  );
   if (!user) return null;
   const { normalizeRoles } = requireRoles();
+  const status = (user.status || "ACTIVE").toUpperCase();
   return {
     id: user.id || user.publicKey,
     publicKey: user.publicKey || user.walletAddress,
     walletAddress: user.publicKey || user.walletAddress,
     roles: normalizeRoles(user.roles || []),
-    status: user.status || "active",
+    role: user.role || normalizeRoles(user.roles || [])[0],
+    status: status === "ACTIVE" || status === "SUSPENDED" || status === "PENDING" || status === "DEACTIVATED"
+      ? status
+      : "ACTIVE",
     createdAt: user.createdAt,
     updatedAt: user.updatedAt || user.lastLoginAt,
     lastLoginAt: user.lastLoginAt,
   };
 }
 
-export function upsertUser(publicKey, { addRoles = [] } = {}) {
+export function upsertUser(publicKey, { addRoles = [], status } = {}) {
   if (!db.users) db.users = [];
   const { normalizeRoles } = requireRoles();
-  let user = db.users.find((u) => u.publicKey === publicKey);
+  let user = db.users.find((u) => u.publicKey === publicKey || u.id === publicKey);
   if (!user) {
     user = {
       id: publicKey,
       publicKey,
       walletAddress: publicKey,
       roles: seedRolesFor(publicKey),
-      status: "active",
+      status: status || "ACTIVE",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       lastLoginAt: new Date().toISOString(),
@@ -566,10 +577,18 @@ export function upsertUser(publicKey, { addRoles = [] } = {}) {
     user.lastLoginAt = new Date().toISOString();
     user.updatedAt = user.lastLoginAt;
     user.roles = normalizeRoles([...(user.roles || []), ...seedRolesFor(publicKey)]);
+    if (status) user.status = status;
   }
   if (addRoles.length) {
     user.roles = normalizeRoles([...(user.roles || []), ...addRoles]);
   }
+  user.role = user.roles.includes("ADMIN")
+    ? "ADMIN"
+    : user.roles.includes("NGO")
+      ? "NGO"
+      : user.roles.includes("RECIPIENT")
+        ? "RECIPIENT"
+        : "DONOR";
   saveState();
   return getUser(publicKey);
 }

@@ -87,7 +87,7 @@ export function requireRole(...roles) {
     requireAuth(req, res, (err) => {
       if (err) return next(err);
       if (!hasAnyRole(req.user.roles, required)) {
-        recordAuthAudit(AuditEvents.AUTHORIZATION_DENIED, {
+        void recordAuthAudit(AuditEvents.AUTHORIZATION_DENIED, {
           walletAddress: req.user.walletAddress,
           reason: "role_required",
           path: req.path,
@@ -110,7 +110,7 @@ export function requirePermission(...perms) {
       if (err) return next(err);
       const ok = perms.some((p) => roleHasPermission(req.user.roles, p));
       if (!ok) {
-        recordAuthAudit(AuditEvents.AUTHORIZATION_DENIED, {
+        void recordAuthAudit(AuditEvents.AUTHORIZATION_DENIED, {
           walletAddress: req.user.walletAddress,
           reason: "permission_denied",
           path: req.path,
@@ -136,7 +136,7 @@ export function requireOwnership(resolveOwner) {
         if (hasAnyRole(req.user.roles, [Roles.ADMIN])) return next();
         const owner = await resolveOwner(req);
         if (!owner || owner !== req.user.walletAddress) {
-          recordAuthAudit(AuditEvents.AUTHORIZATION_DENIED, {
+          await recordAuthAudit(AuditEvents.AUTHORIZATION_DENIED, {
             walletAddress: req.user.walletAddress,
             reason: "ownership",
             path: req.path,

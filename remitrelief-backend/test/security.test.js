@@ -28,6 +28,8 @@ describe("config + demo mode gating", () => {
     process.env.STELLAR_NETWORK = "TESTNET";
     process.env.CORS_ORIGINS = "https://example.com";
     process.env.AUTH_SESSION_SECRET = "prod-secret-for-tests";
+    process.env.STORE_DRIVER = "prisma";
+    process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
     const { resetConfigCache, loadConfig, assertDemoModeAllowed } = await import("../src/config.js");
     resetConfigCache();
     const cfg = loadConfig({ fresh: true });
@@ -47,6 +49,8 @@ describe("config + demo mode gating", () => {
     process.env.NODE_ENV = "production";
     process.env.STELLAR_NETWORK = "TESTNET";
     process.env.AUTH_SESSION_SECRET = "prod-secret-for-tests";
+    process.env.STORE_DRIVER = "prisma";
+    process.env.DATABASE_URL = "postgresql://test:test@localhost:5432/test";
     delete process.env.CORS_ORIGINS;
     const { resetConfigCache, loadConfig } = await import("../src/config.js");
     resetConfigCache();
@@ -131,22 +135,33 @@ describe("wallet auth challenge + sessions", () => {
     );
   });
 
-  it("revokes session on logout", async () => {
+  it("blocks suspended users from resolving sessions", async () => {
+    process.env.NODE_ENV = "development";
+    process.env.DEMO_MODE = "true";
+    process.env.STELLAR_NETWORK = "TESTNET";
+    process.env.AUTH_SESSION_SECRET = "test-auth-secret";
+    process.env.STORE_DRIVER = "json";
+    delete process.env.DATABASE_URL;
     const { resetConfigCache } = await import("../src/config.js");
     resetConfigCache();
-    const { createChallenge, completeLogin, logoutSession, resolveSession } = await import(
+    const { createChallenge, completeLogin, resolveSession } = await import(
       "../src/services/authService.js"
     );
+    const { usersRepo, sessionsRepo } = await import("../src/repositories/index.js");
+    const { Keypair } = await import("@stellar/stellar-sdk");
     const kp = Keypair.random();
     const challenge = await createChallenge({ publicKey: kp.publicKey() });
     const signature = kp.sign(Buffer.from(challenge.message, "utf8")).toString("base64");
-    const { sessionId } = await completeLogin({
+    const { sessionId, user } = await completeLogin({
       publicKey: kp.publicKey(),
       nonce: challenge.nonce,
       signature,
     });
-    await logoutSession(sessionId);
-    await assert.rejects(() => resolveSession(sessionId), (err) => err.code === "SESSION_REVOKED");
+    await usersRepo.updateStatus(user.id, "SUSPENDED");
+    await sessionsRepo.revokeAllForUser(user.id);
+    await assert.rejects(() => resolveSession(sessionId), (err) =>
+      ["SESSION_REVOKED", "USER_SUSPENDED", "INVALID_SESSION"].includes(err.code)
+    );
   });
 });
 

@@ -2,6 +2,7 @@ import { Keypair } from "@stellar/stellar-sdk";
 import { loadConfig } from "../config.js";
 import { AppError, ErrorCodes } from "../lib/errors.js";
 import { randomNonce } from "../lib/jwt.js";
+import { generateSessionToken } from "../auth/sessionToken.js";
 import { usersRepo, sessionsRepo } from "../repositories/index.js";
 import { assertValidStellarPublicKey } from "../auth/walletValidation.js";
 import { Roles, normalizeRoles } from "../auth/roles.js";
@@ -57,7 +58,7 @@ export async function createChallenge({ publicKey }) {
     domain: cfg.auth.domain,
   });
 
-  recordAuthAudit(AuditEvents.AUTH_CHALLENGE_CREATED, { walletAddress });
+  await recordAuthAudit(AuditEvents.AUTH_CHALLENGE_CREATED, { walletAddress });
 
   return {
     publicKey: walletAddress,
@@ -108,7 +109,7 @@ export async function completeLogin({ publicKey, nonce, signature, signedMessage
     : null;
 
   if (peek?.used) {
-    recordAuthAudit(AuditEvents.AUTH_FAILURE, {
+    await recordAuthAudit(AuditEvents.AUTH_FAILURE, {
       walletAddress,
       reason: "challenge_already_used",
     });
@@ -117,7 +118,7 @@ export async function completeLogin({ publicKey, nonce, signature, signedMessage
 
   const challenge = await usersRepo.consumeChallenge(walletAddress, nonce);
   if (!challenge) {
-    recordAuthAudit(AuditEvents.AUTH_FAILURE, {
+    await recordAuthAudit(AuditEvents.AUTH_FAILURE, {
       walletAddress,
       reason: "unknown_challenge",
     });
@@ -127,7 +128,7 @@ export async function completeLogin({ publicKey, nonce, signature, signedMessage
     throw new AppError(ErrorCodes.CHALLENGE_ALREADY_USED, "Challenge already used");
   }
   if (new Date(challenge.expiresAt).getTime() < Date.now()) {
-    recordAuthAudit(AuditEvents.AUTH_FAILURE, {
+    await recordAuthAudit(AuditEvents.AUTH_FAILURE, {
       walletAddress,
       reason: "challenge_expired",
     });
@@ -136,7 +137,7 @@ export async function completeLogin({ publicKey, nonce, signature, signedMessage
 
   const message = signedMessage || challenge.message;
   if (message !== challenge.message) {
-    recordAuthAudit(AuditEvents.AUTH_FAILURE, {
+    await recordAuthAudit(AuditEvents.AUTH_FAILURE, {
       walletAddress,
       reason: "message_mismatch",
     });
@@ -146,7 +147,7 @@ export async function completeLogin({ publicKey, nonce, signature, signedMessage
   try {
     verifyChallengeSignature({ publicKey: walletAddress, message, signature });
   } catch (err) {
-    recordAuthAudit(AuditEvents.AUTH_FAILURE, {
+    await recordAuthAudit(AuditEvents.AUTH_FAILURE, {
       walletAddress,
       reason: "invalid_signature",
     });
@@ -154,9 +155,21 @@ export async function completeLogin({ publicKey, nonce, signature, signedMessage
   }
 
   const user = await usersRepo.upsertFromLogin(walletAddress);
+  if (user.status && user.status !== "ACTIVE") {
+    await recordAuthAudit(AuditEvents.AUTH_FAILURE, {
+      walletAddress,
+      reason: "user_not_active",
+      userId: user.id,
+    });
+    if (user.id && sessionsRepo.revokeAllForUser) {
+      await sessionsRepo.revokeAllForUser(user.id);
+    }
+    throw new AppError(ErrorCodes.USER_SUSPENDED, `Account status is ${user.status}`);
+  }
+
   const roles = normalizeRoles(user.roles);
   const cfg = loadConfig();
-  const sessionId = randomNonce(32);
+  const sessionId = generateSessionToken();
   const expiresAt = new Date(Date.now() + cfg.auth.sessionTtlSec * 1000).toISOString();
 
   const session = await sessionsRepo.create({
@@ -167,8 +180,8 @@ export async function completeLogin({ publicKey, nonce, signature, signedMessage
     expiresAt,
   });
 
-  recordAuthAudit(AuditEvents.AUTH_SUCCESS, { walletAddress, sessionId });
-  recordAuthAudit(AuditEvents.SESSION_CREATED, { walletAddress, sessionId });
+  await recordAuthAudit(AuditEvents.AUTH_SUCCESS, { walletAddress, sessionId, userId: user.id });
+  await recordAuthAudit(AuditEvents.SESSION_CREATED, { walletAddress, sessionId, userId: user.id });
 
   return {
     sessionId: session.id,
@@ -179,8 +192,9 @@ export async function completeLogin({ publicKey, nonce, signature, signedMessage
       walletAddress,
       publicKey: walletAddress,
       roles,
+      role: user.role || roles[0],
       permissions: permissionsForRoles(roles),
-      status: user.status || "active",
+      status: user.status || "ACTIVE",
     },
   };
 }
@@ -201,6 +215,10 @@ export async function resolveSession(sessionId) {
   }
   await sessionsRepo.touch(sessionId);
   const user = await usersRepo.getByPublicKey(session.walletAddress);
+  if (user?.status && user.status !== "ACTIVE") {
+    await sessionsRepo.revoke(sessionId);
+    throw new AppError(ErrorCodes.USER_SUSPENDED, `Account status is ${user.status}`);
+  }
   const roles = normalizeRoles(user?.roles || session.roles || [Roles.DONOR]);
   return {
     sessionId: session.id,
@@ -208,6 +226,8 @@ export async function resolveSession(sessionId) {
     walletAddress: session.walletAddress,
     publicKey: session.walletAddress,
     roles,
+    role: user?.role || roles[0],
+    status: user?.status || "ACTIVE",
     permissions: permissionsForRoles(roles),
     expiresAt: session.expiresAt,
   };
@@ -217,11 +237,11 @@ export async function logoutSession(sessionId) {
   if (!sessionId) return { ok: true };
   const session = await sessionsRepo.revoke(sessionId);
   if (session) {
-    recordAuthAudit(AuditEvents.SESSION_REVOKED, {
+    await recordAuthAudit(AuditEvents.SESSION_REVOKED, {
       walletAddress: session.walletAddress,
       sessionId,
     });
-    recordAuthAudit(AuditEvents.LOGOUT, {
+    await recordAuthAudit(AuditEvents.LOGOUT, {
       walletAddress: session.walletAddress,
       sessionId,
     });
@@ -232,11 +252,15 @@ export async function logoutSession(sessionId) {
 export async function getMeFromSession(sessionId) {
   const ctx = await resolveSession(sessionId);
   return {
-    id: ctx.userId,
-    walletAddress: ctx.walletAddress,
-    publicKey: ctx.walletAddress,
-    roles: ctx.roles,
-    permissions: ctx.permissions,
+    user: {
+      id: ctx.userId,
+      walletAddress: ctx.walletAddress,
+      publicKey: ctx.walletAddress,
+      role: ctx.role,
+      roles: ctx.roles,
+      status: ctx.status,
+      permissions: ctx.permissions,
+    },
     sessionId: ctx.sessionId,
     expiresAt: ctx.expiresAt,
   };

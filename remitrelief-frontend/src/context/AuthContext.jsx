@@ -38,9 +38,10 @@ export function AuthProvider({ children }) {
     }
     try {
       const me = await fetchMe();
-      setUser(me);
+      const nextUser = me.user || me;
+      setUser(nextUser);
       setError(null);
-      return me;
+      return nextUser;
     } catch {
       clearAuth();
       return null;

@@ -26,8 +26,18 @@ export const statsRepo = {
 
 export const usersRepo = {
   getByPublicKey: async (publicKey) => store.getUser(publicKey),
+  findById: async (id) => store.getUser(id),
   upsertFromLogin: async (publicKey) => store.upsertUser(publicKey),
   addRole: async (publicKey, role) => store.addUserRole(publicKey, role),
+  updateStatus: async (userId, status) => {
+    const user = store.getUser(userId);
+    if (!user) return null;
+    const updated = store.upsertUser(user.publicKey || userId, { status });
+    if (status !== "ACTIVE") {
+      store.revokeAllSessionsForUser(userId);
+    }
+    return updated;
+  },
   saveChallenge: async (row) => store.saveAuthChallenge(row),
   getChallenge: async (publicKey, nonce) => store.getAuthChallenge(publicKey, nonce),
   consumeChallenge: async (publicKey, nonce) => store.consumeAuthChallenge(publicKey, nonce),
@@ -40,6 +50,26 @@ export const sessionsRepo = {
   touch: async (id) => store.touchSession(id),
   revoke: async (id) => store.revokeSession(id),
   revokeAllForUser: async (userId) => store.revokeAllSessionsForUser(userId),
+};
+
+export const auditRepo = {
+  create: async () => null,
+  findByUser: async () => [],
+  findRecent: async () => [],
+};
+
+export const profilesRepo = {
+  findByUserId: async () => null,
+  create: async () => null,
+  update: async () => null,
+};
+
+export const organizationsRepo = {
+  create: async () => null,
+  findById: async () => null,
+  findBySlug: async () => null,
+  addMember: async () => null,
+  listMembers: async () => [],
 };
 
 export const indexerRepo = {

@@ -2,71 +2,82 @@
 
 # RemitRelief
 
-**Disaster-relief microdonations on Stellar** — donors send USDC to verified campaigns; funds sit in a per-campaign Soroban escrow and release to the recipient only when an authorized relief partner confirms a milestone.
+**Disaster-relief microdonations on Stellar** — donors send USDC to verified campaigns; funds sit in a per-campaign Soroban escrow and release only after authorized milestone verification.
 
-## Authentication Architecture
+## Authentication Persistence (Phase 3)
 
 ```text
-Wallet Connected  ≠  RemitRelief Authenticated
+Wallet connected  ≠  RemitRelief authenticated
 
 Connect wallet
-   → POST /auth/challenge  (server nonce + network-bound message)
-   → Wallet signs message (no on-chain tx)
-   → POST /auth/verify     (signature check → SessionRepository.create)
-   → HttpOnly cookie (+ Bearer fallback)
-   → requireAuth / requireRole / requirePermission / requireOwnership
+  → POST /auth/challenge
+  → Sign message (no on-chain tx)
+  → POST /auth/verify
+  → User upserted in PostgreSQL (Prisma)
+  → Session created (token hashed at rest; HttpOnly cookie)
+  → GET /auth/me restores after refresh
+  → POST /auth/logout revokes session
 ```
 
-| Concept | Meaning |
-|---------|---------|
-| **Wallet connected** | Browser extension selected an address |
-| **Authenticated** | Server verified a signature and issued a **revocable session** |
+Roles: `DONOR` · `RECIPIENT` · `NGO` · `ADMIN`
+Statuses: `ACTIVE` · `SUSPENDED` · `PENDING` · `DEACTIVATED` (non-ACTIVE cannot use protected APIs)
 
-Roles: `DONOR` (default) · `RECIPIENT` · `NGO` · `ADMIN`  
-Permissions live in `src/auth/permissions.js`. New wallets are never `ADMIN`.
+## Database Setup (Prisma + PostgreSQL)
 
-### Auth API
+```bash
+cd remitrelief-backend
+cp .env.example .env
+# Set DATABASE_URL=postgresql://USER:PASS@HOST:5432/remitrelief?schema=public
+# Set STORE_DRIVER=prisma
+
+npm install
+npm run prisma:generate
+npm run prisma:migrate      # applies prisma/migrations/*
+npm run prisma:seed         # development seed only (refuses production)
+npm run dev
+```
+
+| Variable | Notes |
+|----------|--------|
+| `DATABASE_URL` | **Required in production** |
+| `STORE_DRIVER` | `prisma` / `postgres` for DB; `json` only for local tests without Postgres |
+| Production | `STORE_DRIVER=json` is **rejected** |
+
+Architecture:
+
+```text
+Frontend → API → Middleware → Services → Repositories → Prisma → PostgreSQL
+Services → Blockchain adapter → Soroban (testnet)
+```
+
+PostgreSQL stores users, sessions, audits, campaigns, donations, ledger events, and blockchain **metadata**. On-chain truth still comes from Soroban verification — a DB row is never proof of a chain tx by itself.
+
+Serverless note: Prisma client is a process singleton (`src/database/prisma.js`). Use a pooled `DATABASE_URL` (e.g. Neon pooler) on Vercel.
+
+## Auth API
 
 | Method | Path | Notes |
 |--------|------|-------|
-| POST | `/auth/challenge` | Rate-limited; returns signable message |
-| POST | `/auth/verify` | Sets session cookie; returns user + sessionId |
-| GET | `/auth/me` | Current session |
-| POST | `/auth/logout` | Revokes session + clears cookie |
+| POST | `/auth/challenge` | Rate-limited |
+| POST | `/auth/verify` | Sets session cookie |
+| GET | `/auth/me` | `{ user, sessionId, expiresAt }` |
+| POST | `/auth/logout` | Revokes DB session |
 
-### Protected vs public
-
-- **Public:** `GET /health`, `/stats`, `/campaigns`, `/campaigns/:id`, `/ledger`
-- **Authenticated:** `POST /campaigns`, `/donations`, `/donations/prepare`, `GET /donations`
-- **NGO / ADMIN:** milestone prepare-verify + verify
-- **ADMIN or internal key:** standalone release; ledger reset also needs `ALLOW_STORE_RESET` (dev only)
-
-Donor identity on donations is taken from the **session**, not the request body.
-
-## Architecture
-
-```
-React (WalletContext + AuthContext)
-  → Express (helmet, CORS allowlist, cookie sessions)
-    → services → repositories → JSON (default) or Postgres adapter
-    → blockchain/soroban
-```
-
-Persistence default is JSON. Optional `STORE_DRIVER=postgres` + `DATABASE_URL` prepares for Phase 3 — full Prisma migration is **not** in this phase.
-
-## Quick start
+## Quick start (JSON offline / tests)
 
 ```bash
-cd remitrelief-backend && cp .env.example .env && npm install && npm run dev
-cd remitrelief-frontend && npm install && npm run dev
+cd remitrelief-backend
+# STORE_DRIVER=json (default when DATABASE_URL unset)
+npm install && npm test && npm run dev
+
+cd ../remitrelief-frontend && npm install && npm run dev
 ```
 
-Open `http://localhost:5173`. Connect a wallet and approve the **sign-in** message.
-
-## Tests
+## Tests / build
 
 ```bash
-cd remitrelief-backend && npm test
+cd remitrelief-backend && npm test && npm run prisma:validate
+cd ../remitrelief-frontend && npm run build
 ```
 
 ## Status
